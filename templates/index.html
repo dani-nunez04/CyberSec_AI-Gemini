@@ -1,30 +1,133 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chatbot Estilo ChatGPT</title>
-<link rel="stylesheet" href="styles.css">
-<script src="script.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CyberSec AI Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js" defer></script>
 </head>
 <body>
+    <div class="container">
+        <!-- Vista inicial: Input de objetivo -->
+        <div class="initial-view" id="initialView">
+            <div class="search-container">
+                <h1 class="logo">CyberSec AI</h1>
+                <p class="subtitle">Análisis de Pentesting Inteligente</p>
+                
+                <div class="search-box">
+                    <input 
+                        type="text" 
+                        id="searchInput" 
+                        class="search-input" 
+                        placeholder="Ingresa IP o dominio objetivo"
+                        autocomplete="off"
+                    >
+                    <button class="search-btn" id="searchBtn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <path d="m21 21-4.35-4.35"></path>
+                        </svg>
+                    </button>
+                </div>
 
-<div class="chat-container">
-  <div class="chat-window" id="chatWindow"></div>
-  <div class="input-container">
-    <input type="text" id="userInput" placeholder="Escribe tu pregunta...">
-    <button onclick="sendMessage()">Enviar</button>
-  </div>
-</div>
+                <div class="scan-options">
+                    <label class="scan-option">
+                        <input type="radio" name="scanType" value="basic" checked>
+                        <span>Escaneo Básico</span>
+                    </label>
+                    <label class="scan-option">
+                        <input type="radio" name="scanType" value="deep">
+                        <span>Escaneo Profundo</span>
+                    </label>
+                </div>
+                
+                <div class="suggestions" id="suggestions">
+                    <div class="suggestion-item">192.168.1.100</div>
+                    <div class="suggestion-item">google.com</div>
+                    <div class="suggestion-item">localhost</div>
+                </div>
+            </div>
+        </div>
 
-<!-- Ventana grande -->
-<div class="large-window" id="largeWindow">
-  <div class="large-window-header">
-    Respuesta
-    <span class="close-btn" onclick="closeLargeWindow()">✖</span>
-  </div>
-  <div class="large-window-content" id="largeContent"></div>
-</div>
+        <!-- Vista del Análisis: Modal expandido -->
+        <div class="analysis-view" id="analysisView">
+            <div class="analysis-header">
+                <div class="analysis-title">
+                    <span id="targetIp"></span>
+                    <span class="scan-badge" id="scanBadge">Escaneo Básico</span>
+                </div>
+                <button class="close-btn" id="closeBtn">×</button>
+            </div>
+            
+            <div class="analysis-tabs">
+                <button class="tab-btn active" data-tab="analysis">Análisis</button>
+                <button class="tab-btn" data-tab="nmap">Nmap</button>
+                <button class="tab-btn" data-tab="exploits">Exploits</button>
+                <button class="tab-btn" data-tab="report">Reporte</button>
+            </div>
 
+            <div class="analysis-content">
+                <!-- Tab: Análisis -->
+                <div class="tab-content active" id="analysis-tab">
+                    <div class="analysis-text" id="analysisText"></div>
+                </div>
+
+                <!-- Tab: Nmap -->
+                <div class="tab-content" id="nmap-tab">
+                    <pre id="nmapOutput" class="nmap-output"></pre>
+                </div>
+
+                <!-- Tab: Exploits -->
+                <div class="tab-content" id="exploits-tab">
+                    <div id="exploitsList" class="exploits-list"></div>
+                </div>
+
+                <!-- Tab: Reporte -->
+                <div class="tab-content" id="report-tab">
+                    <div class="report-options">
+                        <button class="report-btn" id="downloadTxt">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Descargar TXT
+                        </button>
+                        <button class="report-btn" id="downloadPdf">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Descargar PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading indicator -->
+        <div class="loading-indicator" id="loadingIndicator">
+            <div class="spinner"></div>
+            <p id="loadingText">Analizando objetivo...</p>
+        </div>
+
+        <!-- Panel de Investigación en Tiempo Real (Estilo Perplexity) -->
+        <div class="investigation-panel" id="investigationPanel">
+            <div class="investigation-header">
+                <h3>🔍 Investigación en Progreso</h3>
+                <div class="investigation-timer" id="investigationTimer">0:00</div>
+            </div>
+            
+            <div class="investigation-progress">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            
+            <div class="investigation-logs" id="investigationLogs">
+                <!-- Los logs se agregan dinámicamente aquí -->
+            </div>
+        </div>
+    </div>
 </body>
 </html>
