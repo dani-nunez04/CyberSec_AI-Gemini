@@ -12,22 +12,53 @@ import sys
 import logging
 from collections import deque
 from datetime import datetime
+import uuid
+import threading
+import concurrent.futures
+import time
+
+# Intentar importar exploitdb_search; si falla, se usará la versión simplificada
+try:
+    from exploitdb_search import search_exploits as search_exploits_faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    FAISS_AVAILABLE = False
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Sistema de logs para el frontend
-analysis_logs = deque(maxlen=100)  # Guardar últimos 100 logs
+analysis_logs = deque(maxlen=100)  # Guardar últimos 100 logs (global)
+
+# Jobs en memoria (simple queue)
+job_store = {}
+
+# Thread-local para enrutar logs al job correcto
+thread_local = threading.local()
+
+# ThreadPool para ejecutar trabajos en background
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
 
 def add_log(message: str, log_type: str = "info"):
-    """Agregar log que será visible en el frontend"""
+    """Agregar log que será visible en el frontend.
+    Si el worker actual tiene un job en thread_local, el log va al job; sino va a logs globales.
+    """
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "message": message,
         "type": log_type  # "info", "searching", "success", "error"
     }
-    analysis_logs.append(log_entry)
+
+    job_id = getattr(thread_local, "current_job", None)
+    if job_id:
+        job = job_store.get(job_id)
+        if job:
+            job["logs"].append(log_entry)
+    else:
+        analysis_logs.append(log_entry)
+
     logger.info(f"[{log_type.upper()}] {message}")
 
 app = FastAPI()
@@ -164,14 +195,37 @@ def extract_services(nmap_output: str) -> list:
     return services
 
 def get_exploits(services: list) -> list:
-    """Busca exploits para cada servicio (versión simplificada sin FAISS)"""
+    """Busca exploits para cada servicio usando FAISS si está disponible, sino usa versión simplificada"""
     all_exploits = []
-    # Versión simplificada: retorna la lista de servicios como exploits potenciales
+    
     for service in services:
+        exploits = []
+        
+        if FAISS_AVAILABLE:
+            try:
+                add_log(f"Buscando exploits para: {service}", "searching")
+                # Buscar exploits usando FAISS
+                faiss_results = search_exploits_faiss(service)
+                
+                if faiss_results:
+                    exploits = faiss_results
+                    add_log(f"Encontrados {len(faiss_results)} exploits para {service}", "success")
+                else:
+                    add_log(f"No se encontraron exploits para: {service}", "info")
+                    exploits = [{"description": f"No encontrado en ExploitDB: {service}", "file": "N/A"}]
+                    
+            except Exception as e:
+                add_log(f"Error buscando exploits para {service}: {str(e)[:50]}", "error")
+                exploits = [{"description": f"Error en búsqueda: {service}", "file": "N/A"}]
+        else:
+            # Versión simplificada si FAISS no está disponible
+            exploits = [{"description": f"Buscar exploit para: {service}", "file": "ExploitDB"}]
+        
         all_exploits.append({
             "service": service,
-            "exploits": [f"Buscar exploit para: {service}"]
+            "exploits": exploits
         })
+    
     return all_exploits
 
 def ensure_report_folder():
@@ -185,13 +239,16 @@ def clean_text(text):
     """Limpia caracteres no ASCII"""
     return ''.join(char if ord(char) < 128 else '?' for char in text)
 
-@app.post("/api/analyze", response_model=AnalysisResponse)
-async def analyze_target(request: PentestRequest):
-    """Endpoint principal: recibe IP y realiza análisis completo"""
-    
+def perform_analysis(job_id: str, request: PentestRequest):
+    """Realiza el análisis completo (ejecutado en background por el executor)"""
     try:
-        # Limpiar logs anteriores
-        analysis_logs.clear()
+        # Establecer el job_id en thread_local para que add_log enrute correctamente
+        thread_local.current_job = job_id
+        
+        # Limpiar logs anteriores para este job
+        job = job_store[job_id]
+        job["logs"] = []
+        
         add_log(f"Iniciando análisis de {request.target_ip} (tipo: {request.scan_type})", "info")
         
         # 1. Escaneo Nmap
@@ -213,51 +270,68 @@ async def analyze_target(request: PentestRequest):
         
         add_log("Análisis completado exitosamente", "success")
         
-        return AnalysisResponse(
-            nmap_output=nmap_output,
-            analysis=analysis,
-            exploits=exploits,
-            services=services
-        )
-    
+        # Guardar resultado en el job
+        job["status"] = "completed"
+        job["result"] = {
+            "nmap_output": nmap_output,
+            "analysis": analysis,
+            "exploits": exploits,
+            "services": services
+        }
+        job["completed_at"] = datetime.now().isoformat()
+        
     except HTTPException as e:
         add_log(f"Error: {e.detail}", "error")
-        raise
+        job = job_store.get(job_id)
+        if job:
+            job["status"] = "error"
+            job["error"] = str(e.detail)
+            job["completed_at"] = datetime.now().isoformat()
     except Exception as e:
         add_log(f"Error inesperado: {str(e)}", "error")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        job = job_store.get(job_id)
+        if job:
+            job["status"] = "error"
+            job["error"] = str(e)
+            job["completed_at"] = datetime.now().isoformat()
+    finally:
+        # Limpiar thread_local
+        thread_local.current_job = None
 
-def extract_services(nmap_output: str) -> list:
-    """Extrae servicios del output de Nmap"""
-    services = []
-    for line in nmap_output.splitlines():
-        if "/tcp" in line or "/udp" in line:
-            parts = line.strip().split()
-            if len(parts) >= 3:
-                services.append(" ".join(parts[2:]))
-    return services
-
-def get_exploits(services: list) -> list:
-    """Busca exploits para cada servicio (versión simplificada sin FAISS)"""
-    all_exploits = []
-    # Versión simplificada: retorna la lista de servicios como exploits potenciales
-    for service in services:
-        all_exploits.append({
-            "service": service,
-            "exploits": [f"Buscar exploit para: {service}"]
-        })
-    return all_exploits
-
-def ensure_report_folder():
-    """Asegura que la carpeta de reportes existe"""
-    folder = "reports"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    return folder
-
-def clean_text(text):
-    """Limpia caracteres no ASCII"""
-    return ''.join(char if ord(char) < 128 else '?' for char in text)
+@app.post("/api/analyze", response_model=AnalysisResponse)
+async def analyze_target(request: PentestRequest):
+    """Endpoint principal: encoloa el análisis y retorna el job_id"""
+    
+    try:
+        # Crear un nuevo job
+        job_id = str(uuid.uuid4())
+        job_store[job_id] = {
+            "id": job_id,
+            "status": "running",
+            "target": request.target_ip,
+            "scan_type": request.scan_type,
+            "created_at": datetime.now().isoformat(),
+            "logs": [],
+            "result": None,
+            "error": None,
+            "completed_at": None
+        }
+        
+        # Encolar el trabajo en el executor
+        executor.submit(perform_analysis, job_id, request)
+        
+        # Retornar el job_id y estado inicial
+        # NOTA: FastAPI esperaría AnalysisResponse con todos los campos,
+        # pero como es async y el job aún no terminó, retornamos 202 Accepted
+        return {
+            "nmap_output": f"[PENDING] Job {job_id} encolado. Use /api/jobs/{job_id}/logs para ver el progreso",
+            "analysis": "Análisis en progreso...",
+            "exploits": [],
+            "services": []
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creando job: {str(e)}")
 
 @app.post("/api/save-report")
 async def save_report(
@@ -348,11 +422,51 @@ async def status():
     """Verifica si la API está activa"""
     return {"status": "active", "message": "CyberSec AI API running"}
 
+@app.get("/api/jobs/{job_id}/status")
+async def get_job_status(job_id: str):
+    """Obtiene el estado de un job específico"""
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    return {
+        "id": job["id"],
+        "status": job["status"],
+        "target": job["target"],
+        "scan_type": job["scan_type"],
+        "created_at": job["created_at"],
+        "completed_at": job["completed_at"],
+        "error": job["error"]
+    }
+
+@app.get("/api/jobs/{job_id}/logs")
+async def get_job_logs(job_id: str):
+    """Obtiene los logs de un job específico"""
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    return {"logs": job["logs"]}
+
+@app.get("/api/jobs/{job_id}/result")
+async def get_job_result(job_id: str):
+    """Obtiene el resultado completo de un job (solo si está completed)"""
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    if job["status"] == "running":
+        raise HTTPException(status_code=202, detail="Job still running")
+    
+    if job["status"] == "error":
+        raise HTTPException(status_code=500, detail=f"Job error: {job['error']}")
+    
+    return job.get("result", {})
+
 @app.get("/api/logs")
 async def get_logs():
-    """Obtiene los logs actuales de la investigación"""
+    """Obtiene los logs actuales de la investigación (global, para compatibilidad)"""
     return {"logs": list(analysis_logs)}
-    return {"status": "active", "message": "CyberSec AI API running"}
 
 # Servir archivos estáticos desde la carpeta templates (DEBE IR AL FINAL)
 if os.path.exists("templates"):

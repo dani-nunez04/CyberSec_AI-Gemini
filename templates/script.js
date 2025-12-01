@@ -3,6 +3,7 @@ const state = {
     analysisActive: false,
     isLoading: false,
     currentAnalysis: null,
+    currentJobId: null,
     targetIp: '',
     scanType: 'basic',
     investigationStartTime: null,
@@ -10,21 +11,29 @@ const state = {
 };
 
 // Elementos del DOM
-const initialView = document.getElementById('initialView');
-const analysisView = document.getElementById('analysisView');
-const searchInput = document.getElementById('searchInput');
-const searchBtn = document.getElementById('searchBtn');
-const closeBtn = document.getElementById('closeBtn');
-const loadingIndicator = document.getElementById('loadingIndicator');
-const loadingText = document.getElementById('loadingText');
-const suggestions = document.querySelectorAll('.suggestion-item');
-const tabBtns = document.querySelectorAll('.tab-btn');
-const scanRadios = document.querySelectorAll('input[name="scanType"]');
-const downloadTxtBtn = document.getElementById('downloadTxt');
-const downloadPdfBtn = document.getElementById('downloadPdf');
-const investigationPanel = document.getElementById('investigationPanel');
-const investigationLogs = document.getElementById('investigationLogs');
-const investigationTimer = document.getElementById('investigationTimer');
+let initialView, analysisView, searchInput, searchBtn, closeBtn, loadingIndicator, loadingText;
+let suggestions, tabBtns, scanRadios, downloadTxtBtn, downloadPdfBtn;
+let investigationPanel, investigationLogs, investigationTimer;
+
+function initializeDOM() {
+    initialView = document.getElementById('initialView');
+    analysisView = document.getElementById('analysisView');
+    searchInput = document.getElementById('searchInput');
+    searchBtn = document.getElementById('searchBtn');
+    closeBtn = document.getElementById('closeBtn');
+    loadingIndicator = document.getElementById('loadingIndicator');
+    loadingText = document.getElementById('loadingText');
+    suggestions = document.querySelectorAll('.suggestion-item');
+    tabBtns = document.querySelectorAll('.tab-btn');
+    scanRadios = document.querySelectorAll('input[name="scanType"]');
+    downloadTxtBtn = document.getElementById('downloadTxt');
+    downloadPdfBtn = document.getElementById('downloadPdf');
+    investigationPanel = document.getElementById('investigationPanel');
+    investigationLogs = document.getElementById('investigationLogs');
+    investigationTimer = document.getElementById('investigationTimer');
+    
+    console.log('✓ DOM elementos inicializados correctamente');
+}
 
 // Funciones para el panel de investigación
 function showInvestigationPanel() {
@@ -80,46 +89,51 @@ function addInvestigationLog(message, type = 'searching') {
 }
 
 // Event Listeners para la vista inicial
-searchInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && searchInput.value.trim()) {
-        startAnalysis(searchInput.value.trim());
-    }
-});
-
-searchBtn.addEventListener('click', () => {
-    if (searchInput.value.trim()) {
-        startAnalysis(searchInput.value.trim());
-    }
-});
-
-// Event Listeners para las sugerencias
-suggestions.forEach(suggestion => {
-    suggestion.addEventListener('click', () => {
-        startAnalysis(suggestion.textContent);
+function attachEventListeners() {
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && searchInput.value.trim()) {
+            startAnalysis(searchInput.value.trim());
+        }
     });
-});
 
-// Event Listeners para los tabs
-tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        const tabName = btn.dataset.tab;
-        switchTab(tabName);
+    searchBtn.addEventListener('click', () => {
+        console.log('Button clicked! Value:', searchInput.value.trim());
+        if (searchInput.value.trim()) {
+            startAnalysis(searchInput.value.trim());
+        }
     });
-});
 
-// Event Listeners para tipo de escaneo
-scanRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        state.scanType = e.target.value;
+    // Event Listeners para las sugerencias
+    suggestions.forEach(suggestion => {
+        suggestion.addEventListener('click', () => {
+            startAnalysis(suggestion.textContent);
+        });
     });
-});
 
-// Event Listeners para botones de descarga
-downloadTxtBtn.addEventListener('click', () => downloadReport('txt'));
-downloadPdfBtn.addEventListener('click', () => downloadReport('pdf'));
+    // Event Listeners para los tabs
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabName = btn.dataset.tab;
+            switchTab(tabName);
+        });
+    });
 
-// Event Listener para cerrar
-closeBtn.addEventListener('click', closeAnalysis);
+    // Event Listeners para tipo de escaneo
+    scanRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            state.scanType = e.target.value;
+        });
+    });
+
+    // Event Listeners para botones de descarga
+    downloadTxtBtn.addEventListener('click', () => downloadReport('txt'));
+    downloadPdfBtn.addEventListener('click', () => downloadReport('pdf'));
+
+    // Event Listener para cerrar
+    closeBtn.addEventListener('click', closeAnalysis);
+    
+    console.log('✓ Event listeners inicializados correctamente');
+}
 
 // Funciones principales
 function startAnalysis(targetIp) {
@@ -160,28 +174,6 @@ function fetchAnalysis(targetIp) {
     addInvestigationLog(`Tipo de escaneo: <strong>${scanTypeText}</strong>`, 'searching');
     addInvestigationLog(`Conectando a API...`, 'searching');
     
-    // Iniciar poller de logs
-    let lastLogCount = 0;
-    const logPoller = setInterval(() => {
-        fetch(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? 'http://localhost:8001/api/logs'
-            : `${window.location.origin}/api/logs`)
-            .then(r => r.json())
-            .then(data => {
-                const logs = data.logs || [];
-                // Agregar solo los logs nuevos
-                if (logs.length > lastLogCount) {
-                    for (let i = lastLogCount; i < logs.length; i++) {
-                        const log = logs[i];
-                        const logType = log.type === 'error' ? 'error' : log.type === 'searching' ? 'searching' : 'success';
-                        addInvestigationLog(log.message, logType);
-                    }
-                    lastLogCount = logs.length;
-                }
-            })
-            .catch(() => {});  // Ignorar errores de polling
-    }, 300);  // Cada 300ms
-    
     // Crear AbortController con timeout de 30 minutos (1800000ms)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1800000);
@@ -195,37 +187,43 @@ function fetchAnalysis(targetIp) {
         signal: controller.signal
     })
     .then(response => {
-        clearTimeout(timeoutId);  // Limpiar timeout
-        clearInterval(logPoller);  // Detener poller
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         return response.json();
     })
     .then(data => {
-        state.currentAnalysis = data;
-        loadingIndicator.classList.remove('show');
+        clearTimeout(timeoutId);
         
-        // Agregar log de éxito
-        addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
-        
-        // Esperar un bit para que se vea el log antes de ocultar
-        setTimeout(() => {
-            hideInvestigationPanel();
-            displayResults(data);
-            switchTab('analysis');
-        }, 800);
+        // La API ahora retorna un job_id encriptado en nmap_output
+        // Extraemos el job_id si está disponible
+        const jobIdMatch = data.nmap_output?.match(/Job ([a-f0-9-]+) encolado/);
+        if (jobIdMatch && jobIdMatch[1]) {
+            state.currentJobId = jobIdMatch[1];
+            addInvestigationLog(`✓ Job encolado: ${state.currentJobId.substring(0, 8)}...`, 'success');
+            
+            // Iniciar polling de logs por job
+            pollJobLogs(state.currentJobId);
+        } else {
+            // Fallback: si no hay job_id, mostrar datos directamente (compatible con versión anterior)
+            state.currentAnalysis = data;
+            loadingIndicator.classList.remove('show');
+            addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
+            
+            setTimeout(() => {
+                hideInvestigationPanel();
+                displayResults(data);
+                switchTab('analysis');
+            }, 800);
+        }
     })
     .catch(error => {
-        clearTimeout(timeoutId);  // Limpiar timeout
-        clearInterval(logPoller);  // Detener poller en caso de error
+        clearTimeout(timeoutId);
         loadingIndicator.classList.remove('show');
         console.error('Error:', error);
         
-        // Agregar log de error
         addInvestigationLog(`Error: ${error.message}`, 'error');
         
-        // Mejorar mensaje según el tipo de error
         let errorMsg = error.message;
         let suggestion = '';
         
@@ -249,6 +247,70 @@ function fetchAnalysis(targetIp) {
         `;
         switchTab('analysis');
     });
+}
+
+function pollJobLogs(jobId) {
+    // Hace polling de los logs del job cada 500ms hasta que esté completado
+    let lastLogCount = 0;
+    let pollAttempts = 0;
+    const maxPollAttempts = 3600; // 30 min * 60 * 2 (polling cada 500ms)
+    
+    const logsBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? `http://localhost:8001/api/jobs/${jobId}`
+        : `${window.location.origin}/api/jobs/${jobId}`;
+    
+    const logPoller = setInterval(() => {
+        pollAttempts++;
+        if (pollAttempts > maxPollAttempts) {
+            clearInterval(logPoller);
+            addInvestigationLog('Error: Timeout en el análisis (superó 30 minutos)', 'error');
+            return;
+        }
+        
+        // Obtener logs
+        fetch(`${logsBaseUrl}/logs`)
+            .then(r => r.json())
+            .then(data => {
+                const logs = data.logs || [];
+                if (logs.length > lastLogCount) {
+                    for (let i = lastLogCount; i < logs.length; i++) {
+                        const log = logs[i];
+                        const logType = log.type === 'error' ? 'error' : log.type === 'searching' ? 'searching' : 'success';
+                        addInvestigationLog(log.message, logType);
+                    }
+                    lastLogCount = logs.length;
+                }
+            })
+            .catch(() => {}); // Ignorar errores de polling
+        
+        // Verificar estado del job
+        fetch(`${logsBaseUrl}/status`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'completed') {
+                    clearInterval(logPoller);
+                    loadingIndicator.classList.remove('show');
+                    addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
+                    
+                    // Obtener resultado completo
+                    fetch(`${logsBaseUrl}/result`)
+                        .then(r => r.json())
+                        .then(result => {
+                            state.currentAnalysis = result;
+                            setTimeout(() => {
+                                hideInvestigationPanel();
+                                displayResults(result);
+                                switchTab('analysis');
+                            }, 800);
+                        });
+                } else if (data.status === 'error') {
+                    clearInterval(logPoller);
+                    loadingIndicator.classList.remove('show');
+                    addInvestigationLog(`✗ Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(() => {}); // Ignorar errores
+    }, 500); // Polling cada 500ms
 }
 
 function displayResults(data) {
@@ -367,7 +429,20 @@ function closeAnalysis() {
     setTimeout(() => searchInput.focus(), 300);
 }
 
-// Enfocar el input de búsqueda al cargar
+// Inicialización cuando el DOM está listo
+document.addEventListener('DOMContentLoaded', () => {
+    initializeDOM();
+    attachEventListeners();
+    searchInput.focus();
+    console.log('✓ Aplicación lista');
+});
+
+// Fallback por si el DOMContentLoaded no se dispara
 window.addEventListener('load', () => {
+    // Verificar si ya se inicializó
+    if (!searchInput || !searchBtn.onclick) {
+        initializeDOM();
+        attachEventListeners();
+    }
     searchInput.focus();
 });
