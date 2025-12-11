@@ -58,6 +58,24 @@ python3 discord_cleaner_bot.py
 
 ## 5) Uso del comando
 
+## Validación de webhooks y tests
+
+- Antes de ejecutar `test_discord_webhooks.py`, valida los webhooks con el script `validate_webhooks.py`:
+
+```bash
+# Ejecutar el validador (usa .env para cargar webhooks)
+python3 validate_webhooks.py
+```
+
+- Alternativamente, prueba un webhook con `curl` (reemplaza por tus valores):
+
+```bash
+curl -v -H "Content-Type: application/json" -d '{"content":"test message"}' https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
+```
+
+- Si `validate_webhooks.py` devuelve `Status: 204` significa OK (no response body). Otros códigos o errores indican un problema (URL inválida, bloqueada por red o webhook borrado).
+
+
 - Slash command:
   - `/clear amount:100` — El bot borrará los últimos `amount` mensajes (predeterminado 100)
   - Opciones adicionales de Slash: `only_webhooks` (boolean) y `dry_run` (boolean)
