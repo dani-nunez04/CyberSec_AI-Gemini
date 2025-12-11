@@ -24,6 +24,9 @@ try:
 except ImportError:
     FAISS_AVAILABLE = False
 
+# Importar Discord Webhook
+from discord_webhook import discord_webhook
+
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -249,6 +252,9 @@ def perform_analysis(job_id: str, request: PentestRequest):
         job = job_store[job_id]
         job["logs"] = []
         
+        # Notificar inicio en Discord
+        discord_webhook.send_job_start(job_id, request.target_ip, request.scan_type)
+        
         add_log(f"Iniciando análisis de {request.target_ip} (tipo: {request.scan_type})", "info")
         
         # 1. Escaneo Nmap
@@ -268,7 +274,13 @@ def perform_analysis(job_id: str, request: PentestRequest):
         add_log("Paso 4/4: Buscando exploits...", "searching")
         exploits = get_exploits(services)
         
+        # Contar exploits encontrados
+        total_exploits = sum(len(e.get('exploits', [])) for e in exploits)
+        
         add_log("Análisis completado exitosamente", "success")
+        
+        # Notificar completación en Discord
+        discord_webhook.send_job_complete(job_id, request.target_ip, len(services), total_exploits)
         
         # Guardar resultado en el job
         job["status"] = "completed"
@@ -281,18 +293,22 @@ def perform_analysis(job_id: str, request: PentestRequest):
         job["completed_at"] = datetime.now().isoformat()
         
     except HTTPException as e:
-        add_log(f"Error: {e.detail}", "error")
+        error_msg = str(e.detail)
+        add_log(f"Error: {error_msg}", "error")
+        discord_webhook.send_job_error(job_id, request.target_ip, error_msg)
         job = job_store.get(job_id)
         if job:
             job["status"] = "error"
-            job["error"] = str(e.detail)
+            job["error"] = error_msg
             job["completed_at"] = datetime.now().isoformat()
     except Exception as e:
-        add_log(f"Error inesperado: {str(e)}", "error")
+        error_msg = str(e)
+        add_log(f"Error inesperado: {error_msg}", "error")
+        discord_webhook.send_job_error(job_id, request.target_ip, error_msg)
         job = job_store.get(job_id)
         if job:
             job["status"] = "error"
-            job["error"] = str(e)
+            job["error"] = error_msg
             job["completed_at"] = datetime.now().isoformat()
     finally:
         # Limpiar thread_local

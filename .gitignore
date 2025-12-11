@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+__pycache__
+*.log
+/reports
+/exploitdb/*.index
+/node_modules
+.DS_Store

@@ -301,6 +301,31 @@ Retornar con descripción + archivo
 
 ---
 
+## 🔁 Conversación Reciente: Discord Webhooks (11 Dic, 2025)
+
+**Solicitud del Usuario:** Añadir la configuración y notas sobre los webhooks de Discord a los archivos del proyecto para continuar la sesión.
+
+**Acciones Realizadas:**
+- Se implementó integración con Discord utilizando `discord_webhook.py` y se documentó en varios archivos: `SETUP_DISCORD_WEBHOOKS.md`, `DISCORD_INTEGRATION.md`, `DISCORD_LOGS_EXPLAINED.md`, `DISCORD_QUICK_START.md` y `DISCORD_SUMMARY.md`.
+- Se añadió un ejemplo en `.env.example` con placeholders para los tres webhooks: `DISCORD_WEBHOOK_LOGS_ANALISIS`, `DISCORD_WEBHOOK_ERRORES`, `DISCORD_WEBHOOK_DESARROLLO`.
+- Se creó `test_discord_webhooks.py` y `test_discord_webhook.py` para validar la configuración localmente sin exponer secretos.
+- Se incluyó un script interactivo `setup_discord.sh` y se creó un nuevo script `add_webhooks_to_env.sh` que ayuda a crear el archivo `.env` localmente (no se commitea) y permite borrar (purge) ese archivo si lo deseas.
+
+**Notas de Seguridad Importantes:**
+- **NUNCA** dejes valores reales de webhooks en `*.example` o en archivos versionados por Git. Usa `.env` para valores secretos.
+- Si compartes el repo o subes a GitHub, asegúrate de que `.env` está en `.gitignore`.
+- Si accidentalmente expusiste un webhook, regenera/elimina el webhook en Discord inmediatamente y actualiza `.env`.
+
+**Estado Actual:**
+- Documentación y scripts creados. El repositorio contiene `*.example` y scripts para guiar la configuración local.
+- No se guardaron webhooks reales en el repo. Si nos pasas webhooks reales, te ayudaré a colocarlos localmente en un `.env` y luego los borraré del entorno si lo deseas.
+
+**Siguiente Paso Recomendado:**
+- Crear los webhooks en Discord (canales: `#logs-analisis`, `#errores-internos`, `#desarrollo`) y usar `add_webhooks_to_env.sh` para configurarlos localmente, luego ejecutar `python3 test_discord_webhooks.py`.
+
+
+---
+
 ## 📞 Información de Contacto
 
 **Proyecto:** CyberSec_AI  
