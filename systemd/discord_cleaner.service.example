@@ -1,0 +1,18 @@
+[Unit]
+Description=CyberSec AI Discord Cleaner Bot
+After=network.target
+
+[Service]
+Type=simple
+User=discorduser
+WorkingDirectory=/path/to/CyberSec_AI
+EnvironmentFile=/path/to/CyberSec_AI/.env
+ExecStart=/path/to/CyberSec_AI/venv/bin/python3 /path/to/CyberSec_AI/discord_cleaner_bot.py
+Restart=always
+RestartSec=5
+Nice=10
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target
