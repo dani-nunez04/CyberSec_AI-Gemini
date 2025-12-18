@@ -401,7 +401,31 @@ function downloadReport(format) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert(`Reporte guardado: ${data.filename}`);
+            const filename = data.filename || '';
+            const downloadUrl = data.download_url || `/api/reports/${filename}`;
+            // Fetch the file and trigger a client-side download
+            fetch(downloadUrl)
+                .then(resp => {
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    return resp.blob();
+                })
+                .then(blob => {
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename || 'report';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(blobUrl);
+                    addInvestigationLog(`✅ Reporte descargado: ${filename}`, 'success');
+                })
+                .catch(err => {
+                    console.error('Download error:', err);
+                    alert('Error descargando el reporte desde el servidor.');
+                });
+        } else {
+            alert('No se pudo guardar el reporte');
         }
         downloadTxtBtn.disabled = false;
         downloadPdfBtn.disabled = false;
