@@ -4,16 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CyberSec AI Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#667eea',
+              secondary: '#764ba2',
+              accent: '#64c8ff',
+              bg1: '#0a0e27',
+              bg2: '#1a1f3a'
+            }
+          }
+        }
+      }
+    </script>
     <link rel="stylesheet" href="styles.css">
     <script src="script.js" defer></script>
 </head>
 <body>
-    <div class="container">
+    <div class="app-container">
         <!-- Vista inicial: Input de objetivo -->
         <div class="initial-view" id="initialView">
             <div class="search-container">
-                <h1 class="logo">CyberSec AI</h1>
-                <p class="subtitle">Análisis de Pentesting Inteligente</p>
+                <div class="hero-halo"></div>
+                <div class="logo-wrap" aria-label="CyberSec AI">
+                    <span class="logo-blur"></span>
+                        <h1 class="logo logo-glitch" data-text="CyberSec AI">
+                            <span class="logo-word">CyberSec</span>
+                            <span class="logo-tagline">Análisis de Pentest Inteligente</span>
+                            <span class="logo-word">AI</span>
+                        </h1>
+                    <span class="logo-scanline"></span>
+                </div>
                 
                 <div class="search-box">
                     <input 
@@ -23,7 +47,7 @@
                         placeholder="Ingresa IP o dominio objetivo"
                         autocomplete="off"
                     >
-                    <button class="search-btn" id="searchBtn">
+                    <button class="search-btn btn rounded-full w-10 h-10 flex items-center justify-center transition-transform transform hover:scale-110" id="searchBtn">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="11" cy="11" r="8"></circle>
                             <path d="m21 21-4.35-4.35"></path>
@@ -32,20 +56,20 @@
                 </div>
 
                 <div class="scan-options">
-                    <label class="scan-option">
-                        <input type="radio" name="scanType" value="basic" checked>
-                        <span>Escaneo Básico</span>
+                    <label class="scan-option inline-flex items-center">
+                        <input type="radio" name="scanType" value="basic" checked class="peer sr-only">
+                        <span class="px-4 py-2 text-sm rounded-full bg-gradient-to-r from-primary to-secondary text-white shadow-sm transition transform hover:scale-105 peer-checked:shadow-md">Escaneo Básico</span>
                     </label>
-                    <label class="scan-option">
-                        <input type="radio" name="scanType" value="deep">
-                        <span>Escaneo Profundo</span>
+                    <label class="scan-option inline-flex items-center">
+                        <input type="radio" name="scanType" value="deep" class="peer sr-only">
+                        <span class="px-4 py-2 text-sm rounded-full bg-gradient-to-r from-primary to-secondary text-white shadow-sm transition transform hover:scale-105 peer-checked:shadow-md">Escaneo Profundo</span>
                     </label>
                 </div>
                 
                 <div class="suggestions" id="suggestions">
-                    <div class="suggestion-item">192.168.1.100</div>
-                    <div class="suggestion-item">google.com</div>
-                    <div class="suggestion-item">localhost</div>
+                    <div class="suggestion-item">example.com</div>
+                    <div class="suggestion-item">scanme.nmap.org</div>
+                    <div class="suggestion-item">testphp.vulnweb.com</div>
                 </div>
             </div>
         </div>
@@ -57,14 +81,14 @@
                     <span id="targetIp"></span>
                     <span class="scan-badge" id="scanBadge">Escaneo Básico</span>
                 </div>
-                <button class="close-btn" id="closeBtn">×</button>
+                <button class="close-btn p-2 rounded-md hover:bg-white/10" id="closeBtn">×</button>
             </div>
             
             <div class="analysis-tabs">
-                <button class="tab-btn active" data-tab="analysis">Análisis</button>
-                <button class="tab-btn" data-tab="nmap">Nmap</button>
-                <button class="tab-btn" data-tab="exploits">Exploits</button>
-                <button class="tab-btn" data-tab="report">Reporte</button>
+                <button class="tab-btn tab-btn-ui active px-4 py-2 rounded-md" data-tab="analysis">Análisis</button>
+                <button class="tab-btn tab-btn-ui px-4 py-2 rounded-md" data-tab="nmap">Nmap</button>
+                <button class="tab-btn tab-btn-ui px-4 py-2 rounded-md" data-tab="exploits">Exploits</button>
+                <button class="tab-btn tab-btn-ui px-4 py-2 rounded-md" data-tab="report">Reporte</button>
             </div>
 
             <div class="analysis-content">
@@ -86,7 +110,7 @@
                 <!-- Tab: Reporte -->
                 <div class="tab-content" id="report-tab">
                     <div class="report-options">
-                        <button class="report-btn" id="downloadTxt">
+                        <button class="report-btn btn px-4 py-2 rounded-md flex items-center gap-2" id="downloadTxt">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                 <polyline points="7 10 12 15 17 10"></polyline>
@@ -94,7 +118,7 @@
                             </svg>
                             Descargar TXT
                         </button>
-                        <button class="report-btn" id="downloadPdf">
+                        <button class="report-btn btn px-4 py-2 rounded-md flex items-center gap-2" id="downloadPdf">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                                 <polyline points="7 10 12 15 17 10"></polyline>

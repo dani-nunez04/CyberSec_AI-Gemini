@@ -347,7 +347,7 @@ Retornar con descripción + archivo
 - FastAPI + Uvicorn
 - ThreadPoolExecutor (Python stdlib)
 - FAISS + SentenceTransformers
-- Ollama (DeepSeek-Coder 1.3b)
+- Ollama (llama3.2:1b)
 - Nmap
 - ExploitDB
 

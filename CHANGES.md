@@ -13,6 +13,7 @@
 | `/api/jobs/{job_id}/result` | Endpoint | ✅ | Get final results when completed |
 | `add_log()` routing | Modified | ✅ | Routes logs to job or global based on thread context |
 | ExploitDB integration | New | ✅ | Import `search_exploits_faiss` with fallback |
+| AI analysis strict prompt + validation | New | ✅ | The Ollama prompt now requests JSON with explicit `evidence_line`. Backend parses and validates claims against Nmap output and ExploitDB, adding `confidence` and `evidence` fields to results |
 | `get_exploits()` FAISS search | Modified | ✅ | Real exploit search instead of placeholders |
 | Removed duplicates | Cleanup | ✅ | Removed duplicate function definitions |
 
@@ -33,6 +34,7 @@
 |--------|------|--------|---------|
 | Investigation panel | Existing | ✓ | Already implemented, works with new job system |
 | Log display | Compatible | ✓ | Displays logs from job polling |
+| Tailwind (CDN) + button restyle | Enhancement | ✅ | Added Tailwind via CDN and applied utility classes to buttons for improved spacing, shapes, and interactions while preserving the original color palette (via `.btn` CSS helper). Scan options now use `peer` + `sr-only` to hide radios and display Tailwind-styled toggle buttons. Fixed page centering (renamed `.container` to `.app-container` and adjusted body min-height/overflow). Updated example suggestions in UI to more sensible test targets (example.com, scanme.nmap.org, testphp.vulnweb.com) |
 
 ### Documentation
 

@@ -1,10 +1,10 @@
 # CyberSec AI - Asistente Inteligente de Pentesting
 
-Un proyecto Python que utiliza **DeepSeek-Coder:1.3b** (vía Ollama) para análisis inteligente de ciberseguridad.
+Un proyecto Python que utiliza **llama3.2:1b** (vía Ollama) para análisis inteligente de ciberseguridad.
 
 Integra:
 - **Nmap**: Escaneo de servicios y puertos
-- **Ollama + DeepSeek-Coder**: Análisis inteligente de vulnerabilidades
+- **Ollama + llama3.2:1b**: Análisis inteligente de vulnerabilidades
 - **ExploitDB**: Búsqueda de exploits usando FAISS y SentenceTransformers
 - **FastAPI**: API REST con interfaz web moderna
 - **Reportes**: Generación de reportes en TXT y PDF
@@ -17,7 +17,7 @@ Integra:
 - **Linux** (Ubuntu 20.04+) o WSL2
 - **Python 3.8+**
 - **Nmap** instalado
-- **Ollama** con modelo `deepseek-coder:1.3b`
+- **Ollama** con modelo `llama3.2:1b`
 
 ### Instalación de dependencias del sistema
 ```bash
@@ -27,7 +27,7 @@ sudo apt install -y nmap
 
 ### Instalación de Ollama
 1. Descarga desde [ollama.ai](https://ollama.ai)
-2. Ejecuta: `ollama pull deepseek-coder:1.3b`
+2. Ejecuta: `ollama pull llama3.2:1b`
 3. Verifica: `ollama list`
 
 ## 🚀 Inicio Rápido
@@ -200,7 +200,7 @@ Verifica que:
 ollama serve
 
 # En otra terminal
-ollama run deepseek-coder:1.3b
+ollama run llama3.2:1b
 ```
 
 ### "Nmap no funciona"

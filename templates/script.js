@@ -35,6 +35,37 @@ function initializeDOM() {
     console.log('✓ DOM elementos inicializados correctamente');
 }
 
+function wrapLogoLetters() {
+    const targets = document.querySelectorAll('.logo-word');
+    let letterIndex = 0;
+
+    console.log('🔤 Envolviendo letras, encontrados:', targets.length, 'elementos');
+
+    targets.forEach(target => {
+        const text = target.textContent.trim();
+        const fragment = document.createDocumentFragment();
+
+        text.split('').forEach(char => {
+            if (char === ' ') {
+                fragment.appendChild(document.createTextNode(' '));
+                return;
+            }
+            const span = document.createElement('span');
+            span.className = 'logo-letter';
+            span.style.setProperty('--i', letterIndex);
+            span.setAttribute('data-char', char);
+            span.textContent = char;
+            fragment.appendChild(span);
+            letterIndex += 1;
+        });
+
+        target.textContent = '';
+        target.appendChild(fragment);
+    });
+    
+    console.log('✓ Total de letras envueltas:', letterIndex);
+}
+
 // Funciones para el panel de investigación
 function showInvestigationPanel() {
     investigationPanel.classList.add('active');
@@ -456,6 +487,7 @@ function closeAnalysis() {
 // Inicialización cuando el DOM está listo
 document.addEventListener('DOMContentLoaded', () => {
     initializeDOM();
+    wrapLogoLetters();
     attachEventListeners();
     searchInput.focus();
     console.log('✓ Aplicación lista');
@@ -466,6 +498,7 @@ window.addEventListener('load', () => {
     // Verificar si ya se inicializó
     if (!searchInput || !searchBtn.onclick) {
         initializeDOM();
+        wrapLogoLetters();
         attachEventListeners();
     }
     searchInput.focus();

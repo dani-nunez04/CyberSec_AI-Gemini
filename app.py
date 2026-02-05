@@ -16,6 +16,8 @@ import uuid
 import threading
 import concurrent.futures
 import time
+import difflib
+import re
 
 # Intentar importar exploitdb_search; si falla, se usará la versión simplificada
 try:
@@ -79,6 +81,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Warmup: pre-carga del modelo Ollama al arrancar para evitar latencia en la primera petición
+@app.on_event("startup")
+async def warm_ollama():
+    def _warm():
+        try:
+            add_log("Warmup: pre-cargando modelo llama3.2:1b", "info")
+            # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
+            subprocess.run([
+                "ollama",
+                "run",
+                "llama3.2:1b",
+                "--hidethinking",
+                "--keepalive",
+                "5m"
+            ], input="Warmup", text=True, capture_output=True, timeout=30)
+            add_log("Warmup Ollama completado", "info")
+        except Exception as e:
+            add_log(f"Warmup Ollama falló: {str(e)}", "error")
+    executor.submit(_warm)
+
 class PentestRequest(BaseModel):
     target_ip: str
     scan_type: str = "basic"  # basic, deep, etc
@@ -135,18 +157,29 @@ def analyze_with_ollama(scan_output: str, ip: str) -> str:
     try:
         add_log(f"Iniciando análisis con Ollama para {ip}", "searching")
         
-        prompt = f"""Analiza estos resultados de Nmap para {ip}:
+        prompt = f"""Analiza estos resultados de Nmap para {ip} (escribe solo JSON válido):
 
 {scan_output}
 
-Proporciona:
-1. Servicios detectados y sus versiones
-2. Vulnerabilidades potenciales
-3. Puntos débiles de seguridad
-4. Vectores de ataque posibles
-5. Recomendaciones de remediación
+Devuelve UN ÚNICO objeto JSON con la siguiente estructura:
+{{
+  "vulnerabilities": [
+    {{
+      "name": "Nombre corto de la vulnerabilidad o servicio",
+      "service": "servicio tal como aparece en Nmap (ej: ssh, http)",
+      "description": "Breve explicación",
+      "evidence_line": "Una línea EXACTA del output de Nmap que respalde la afirmación (si existe)",
+      "cve": "CVE-YYYY-NNNN (opcional)",
+      "exploit_reference": "exploitdb:ID o texto de referencia (opcional)"
+    }}
+  ],
+  "notes": "Opcional: comentarios sobre incertidumbres"
+}}
 
-Sé conciso pero informativo."""
+Reglas estrictas:
+- SOLO reporta vulnerabilidades si hay EVIDENCIA DIRECTA: una línea del output de Nmap que muestre el servicio/version O una entrada concreta de ExploitDB que coincida.
+- Si no hay evidencia suficiente, devuelve {{"vulnerabilities": [], "notes": "No hay evidencia suficiente para afirmar vulnerabilidades específicas."}} y NO inventes ataques.
+- IMPORTANTE: no devuelvas texto explicativo fuera del JSON (solo el objeto JSON)."""
 
         add_log("Conectando a Ollama (puede tardar)...", "searching")
         # Quick health check: is the `ollama` process reachable?
@@ -172,8 +205,11 @@ Sé conciso pero informativo."""
                 
                 # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
                 ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
+                cmd = ["ollama", "run", "llama3.2:1b", "--verbose", "--hidethinking", "--keepalive", "5m"]
+                add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
+                start_time = time.time()
                 process = subprocess.run(
-                    ["ollama", "run", "deepseek-coder:1.3b"],
+                    cmd,
                     input=prompt,
                     text=True,
                     capture_output=True,
@@ -181,6 +217,8 @@ Sé conciso pero informativo."""
                     errors='replace',
                     timeout=ollama_timeout
                 )
+                duration = time.time() - start_time
+                add_log(f"Ollama run duró {duration:.1f}s (returncode={process.returncode})", "info")
                 
                 # Log for debugging - strip ANSI escape sequences to improve readability
                 stderr_clean = strip_ansi_sequences(process.stderr)
@@ -216,15 +254,22 @@ Sé conciso pero informativo."""
                     add_log(detail, "error")
                     # If the error looks like OOM/killed, attempt fallback model if available
                     if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-                        fallback = select_fallback_model("deepseek-coder:1.3b")
-                        if fallback and fallback != "deepseek-coder:1.3b":
+                        fallback = select_fallback_model("llama3.2:1b")
+                        if fallback and fallback != "llama3.2:1b":
                             add_log(f"Intentando fallback con modelo {fallback}", "searching")
                             try:
-                                fb_proc = subprocess.run([
-                                    "ollama",
-                                    "run",
-                                    fallback
-                                ], input=prompt, text=True, capture_output=True, timeout=120)
+                                fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
+                                add_log(f"Ejecutando fallback comando: {' '.join(fb_cmd)}", "info")
+                                fb_start = time.time()
+                                fb_proc = subprocess.run(
+                                    fb_cmd,
+                                    input=prompt,
+                                    text=True,
+                                    capture_output=True,
+                                    timeout=120
+                                )
+                                fb_duration = time.time() - fb_start
+                                add_log(f"Fallback run duró {fb_duration:.1f}s (returncode={fb_proc.returncode})", "info")
                                 fb_stderr = strip_ansi_sequences(fb_proc.stderr)
                                 fb_stdout = strip_ansi_sequences(fb_proc.stdout)
                                 if fb_proc.returncode == 0 and fb_stdout.strip():
@@ -312,6 +357,181 @@ def get_exploits(services: list) -> list:
     
     return all_exploits
 
+def extract_json_from_text(text: str):
+    """Attempt to extract and parse the first JSON object/array found in text."""
+    import json
+    if not text:
+        return None
+    # Try a simple regex to find a JSON object or array
+    m = re.search(r'(\{.*\}|\[.*\])', text, flags=re.DOTALL)
+    if m:
+        candidate = m.group(1)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+    # Fallback: try to find the first { ... } block
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        candidate = text[start:end+1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+    return None
+
+
+def find_exploit_refs(query: str, limit: int = 10):
+    """Search ExploitDB for query. Uses FAISS if available, otherwise text search as fallback."""
+    results = []
+    try:
+        if FAISS_AVAILABLE:
+            try:
+                faiss_res = search_exploits_faiss(query)
+                if faiss_res:
+                    return faiss_res[:limit]
+            except Exception:
+                pass
+        data_file = "exploitdb_data.txt"
+        if os.path.exists(data_file):
+            with open(data_file, encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    if query.lower() in line.lower():
+                        results.append(line.strip())
+                        if len(results) >= limit:
+                            break
+    except Exception:
+        pass
+    return results
+
+
+def max_confidence(c1: str, c2: str) -> str:
+    order = ["low", "medium", "high"]
+    try:
+        return c2 if order.index(c2) > order.index(c1) else c1
+    except Exception:
+        return c2 if c2 == "high" else c1
+
+
+def classify_and_validate_vulnerabilities(parsed_vulns, nmap_output: str, services: list):
+    """Validate parsed vulnerabilities against the Nmap output and ExploitDB.
+
+    Returns a list of records with match_type, confidence and evidence.
+    """
+    validated = []
+    for v in parsed_vulns:
+        name = (v.get('name') or v.get('title') or v.get('vuln') or "").strip()
+        service_claim = (v.get('service') or "").strip()
+        description = (v.get('description') or v.get('desc') or v.get('details') or "").strip()
+        evidence_line = v.get('evidence_line')
+        cve = v.get('cve')
+        exploit_ref = (v.get('exploit_reference') or v.get('exploit') or v.get('reference') or "").strip()
+
+        result = {
+            "name": name,
+            "service_claim": service_claim,
+            "description": description,
+            "cve": cve,
+            "exploit_reference": exploit_ref,
+            "match_type": "none",
+            "confidence": "low",
+            "evidence": None,
+            "exploit_matches": [],
+            "notes": None,
+        }
+
+        # If an evidence_line was supplied by the model, try to find an exact match in Nmap output
+        if evidence_line:
+            for line in nmap_output.splitlines():
+                if evidence_line.strip().lower() in line.lower():
+                    result["match_type"] = "exact"
+                    result["confidence"] = "high"
+                    result["evidence"] = line.strip()
+                    break
+
+        # If no evidence_line, check service exact match with detected services
+        if result["match_type"] == "none" and service_claim:
+            for svc in services:
+                if service_claim.lower() in svc.lower() or svc.lower() in service_claim.lower():
+                    result["match_type"] = "exact"
+                    result["confidence"] = "high"
+                    # find an evidence line containing service name
+                    for line in nmap_output.splitlines():
+                        if svc.split()[0].lower() in line.lower():
+                            result["evidence"] = line.strip()
+                            break
+                    break
+
+        # Fuzzy match across services
+        if result["match_type"] == "none" and service_claim and services:
+            best_score = 0.0
+            best_svc = None
+            for svc in services:
+                score = difflib.SequenceMatcher(None, service_claim.lower(), svc.lower()).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_svc = svc
+            if best_score >= 0.9:
+                result["match_type"] = "fuzzy"
+                result["confidence"] = "medium"
+                for line in nmap_output.splitlines():
+                    if best_svc and best_svc.split()[0].lower() in line.lower():
+                        result["evidence"] = line.strip()
+                        break
+            elif best_score >= 0.75:
+                result["match_type"] = "possible"
+                result["confidence"] = "low"
+
+        # Check exploit references and CVEs against ExploitDB
+        if exploit_ref:
+            matches = find_exploit_refs(exploit_ref)
+            result["exploit_matches"] = matches
+            if matches:
+                result["confidence"] = max_confidence(result["confidence"], "medium")
+                if not result["evidence"]:
+                    result["evidence"] = matches[0]
+
+        if cve and not result["evidence"]:
+            matches = find_exploit_refs(cve)
+            if matches:
+                result["exploit_matches"].extend(matches)
+                result["confidence"] = max_confidence(result["confidence"], "medium")
+                if not result["evidence"]:
+                    result["evidence"] = matches[0]
+
+        # If no services detected at all, keep low confidence and add note
+        if not services:
+            result["notes"] = "No se detectaron servicios; no se puede confirmar esta vulnerabilidad sin evidencia adicional."
+            result["confidence"] = "low"
+
+        validated.append(result)
+    return validated
+
+
+def validate_and_classify_analysis(analysis_text: str, nmap_output: str, services: list):
+    """Parse AI analysis (prefer JSON) and classify/validate claims."""
+    parsed = extract_json_from_text(analysis_text)
+    parsed_vulns = []
+    if parsed and isinstance(parsed, dict) and parsed.get('vulnerabilities'):
+        parsed_vulns = parsed.get('vulnerabilities')
+    elif parsed and isinstance(parsed, list):
+        parsed_vulns = parsed
+    else:
+        # Fallback: extract CVEs and lines mentioning vulnerabilities
+        cves = list(set(re.findall(r"CVE-\d{4}-\d{4,7}", analysis_text, flags=re.I)))
+        for c in cves:
+            parsed_vulns.append({"name": c, "description": f"Mentioned CVE {c}", "cve": c})
+        if not parsed_vulns:
+            # Add first few non-empty lines as claims
+            lines = [l.strip() for l in analysis_text.splitlines() if l.strip()]
+            for i, line in enumerate(lines[:5]):
+                parsed_vulns.append({"name": f"claim_{i+1}", "description": line})
+
+    validated = classify_and_validate_vulnerabilities(parsed_vulns, nmap_output, services)
+    return {"vulnerabilities": validated}
+
+
 def ensure_report_folder():
     """Asegura que la carpeta de reportes existe"""
     folder = "reports"
@@ -344,6 +564,46 @@ def strip_ansi_sequences(text: str) -> str:
     # Remove other common control codes (carriage returns, backspace, etc.)
     cleaned = re.sub(r"[\x00-\x1F\x7F]+", "", cleaned)
     return cleaned.strip()
+
+
+@app.get("/api/ollama/debug")
+async def ollama_debug():
+    """Endpoint simple para diagnosticar Ollama: lista modelos y hace un run corto"""
+    try:
+        ls = subprocess.run(["ollama", "ls"], capture_output=True, text=True, timeout=5)
+        ls_out = strip_ansi_sequences(ls.stdout)
+        ls_err = strip_ansi_sequences(ls.stderr)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Ollama no encontrado")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Timeout ejecutando `ollama ls`")
+
+    try:
+        # Ejecutar un run corto con timeout limitado
+        run_proc = subprocess.run(
+            ["ollama", "run", "llama3.2:1b", "--verbose", "--hidethinking", "--keepalive", "1m"],
+            input="Ping",
+            text=True,
+            capture_output=True,
+            timeout=20
+        )
+        run_out = strip_ansi_sequences(run_proc.stdout)
+        run_err = strip_ansi_sequences(run_proc.stderr)
+    except subprocess.TimeoutExpired:
+        run_out = ""
+        run_err = "Timeout during run"
+        run_proc = None
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando ollama run: {str(e)[:300]}")
+
+    return {
+        "ls_returncode": ls.returncode,
+        "ls_stdout": ls_out,
+        "ls_stderr": ls_err,
+        "run_returncode": run_proc.returncode if run_proc is not None else -1,
+        "run_stdout": run_out,
+        "run_stderr": run_err
+    }
 
 
 def parse_model_size(model_name: str) -> float | None:
@@ -396,7 +656,7 @@ def diagnose_ollama_error(stderr_clean: str) -> str:
     if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
         return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
     if "model not found" in lower or "no such model" in lower or "not found" in lower:
-        return "Modelo no encontrado - ejecuta `ollama pull deepseek-coder:1.3b`"
+        return "Modelo no encontrado - ejecuta `ollama pull llama3.2:1b`"
     if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
         return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
     if "permission denied" in lower:
@@ -429,7 +689,9 @@ def perform_analysis(job_id: str, request: PentestRequest):
         
         # 3. Análisis con IA
         add_log("Paso 3/4: Analizando con IA...", "searching")
-        analysis = analyze_with_ollama(nmap_output, request.target_ip)
+        analysis_text = analyze_with_ollama(nmap_output, request.target_ip)
+        add_log("Validando afirmaciones de la IA...", "searching")
+        validated_analysis = validate_and_classify_analysis(analysis_text, nmap_output, services)
         
         # 4. Busca exploits
         add_log("Paso 4/4: Buscando exploits...", "searching")
@@ -447,7 +709,8 @@ def perform_analysis(job_id: str, request: PentestRequest):
         job["status"] = "completed"
         job["result"] = {
             "nmap_output": nmap_output,
-            "analysis": analysis,
+            "analysis": analysis_text,
+            "analysis_validated": validated_analysis,
             "exploits": exploits,
             "services": services
         }
@@ -655,7 +918,7 @@ async def ollama_test_run(request: Request):
         process = subprocess.run([
             "ollama",
             "run",
-            "deepseek-coder:1.3b"
+            "llama3.2:1b"
         ], input=prompt, capture_output=True, text=True, timeout=30)
 
         diagnosis = diagnose_ollama_error(strip_ansi_sequences(process.stderr)[:2000] if process.stderr else "")
