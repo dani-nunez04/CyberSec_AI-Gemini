@@ -508,28 +508,6 @@ body::after {
     padding: 20px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    max-height: 60vh;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-}
-
-/* Cursor parpadeante estilo ChatGPT */
-.analysis-text.typing::after {
-    content: '▋';
-    display: inline;
-    color: #64c8ff;
-    animation: blink-cursor 0.8s infinite;
-    margin-left: 2px;
-    font-weight: normal;
-}
-
-@keyframes blink-cursor {
-    0%, 50% {
-        opacity: 1;
-    }
-    51%, 100% {
-        opacity: 0;
-    }
 }
 
 .nmap-output {

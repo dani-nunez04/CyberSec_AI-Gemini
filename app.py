@@ -86,17 +86,17 @@ app.add_middleware(
 async def warm_ollama():
     def _warm():
         try:
-            add_log("Warmup: pre-cargando modelo llama3.2:1b", "info")
+            add_log("Warmup: pre-cargando modelo WhiteRabbitNeo-V3-7B", "info")
             # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
             subprocess.run([
                 "ollama",
                 "run",
-                "llama3.2:1b",
+                "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B",
                 "--hidethinking",
                 "--keepalive",
                 "5m"
-            ], input="Warmup", text=True, capture_output=True, timeout=30)
-            add_log("Warmup Ollama completado", "info")
+            ], input="Warmup", text=True, capture_output=True, timeout=60)
+            add_log("Warmup WhiteRabbitNeo completado", "info")
         except Exception as e:
             add_log(f"Warmup Ollama falló: {str(e)}", "error")
     executor.submit(_warm)
@@ -153,33 +153,47 @@ def scan_target(ip: str, scan_type: str = "basic") -> str:
 
 
 def analyze_with_ollama(scan_output: str, ip: str) -> str:
-    """Analiza el output de Nmap con Ollama"""
+    """Analiza el output de Nmap con WhiteRabbitNeo (modelo especializado en pentesting)"""
     try:
-        add_log(f"Iniciando análisis con Ollama para {ip}", "searching")
+        add_log(f"Iniciando análisis con WhiteRabbitNeo para {ip}", "searching")
         
-        prompt = f"""Analiza estos resultados de Nmap para {ip} (escribe solo JSON válido):
+        prompt = f"""Eres WhiteRabbitNeo, un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
 
+## RESULTADOS DEL ESCANEO NMAP:
 {scan_output}
 
-Devuelve UN ÚNICO objeto JSON con la siguiente estructura:
-{{
-  "vulnerabilities": [
-    {{
-      "name": "Nombre corto de la vulnerabilidad o servicio",
-      "service": "servicio tal como aparece en Nmap (ej: ssh, http)",
-      "description": "Breve explicación",
-      "evidence_line": "Una línea EXACTA del output de Nmap que respalde la afirmación (si existe)",
-      "cve": "CVE-YYYY-NNNN (opcional)",
-      "exploit_reference": "exploitdb:ID o texto de referencia (opcional)"
-    }}
-  ],
-  "notes": "Opcional: comentarios sobre incertidumbres"
-}}
+## INSTRUCCIONES DE ANÁLISIS:
+Proporciona un análisis exhaustivo desde la perspectiva de un pentester profesional:
 
-Reglas estrictas:
-- SOLO reporta vulnerabilidades si hay EVIDENCIA DIRECTA: una línea del output de Nmap que muestre el servicio/version O una entrada concreta de ExploitDB que coincida.
-- Si no hay evidencia suficiente, devuelve {{"vulnerabilities": [], "notes": "No hay evidencia suficiente para afirmar vulnerabilidades específicas."}} y NO inventes ataques.
-- IMPORTANTE: no devuelvas texto explicativo fuera del JSON (solo el objeto JSON)."""
+1. **RESUMEN EJECUTIVO**: Valoración rápida del objetivo - ¿qué tan expuesto está? ¿Es un objetivo fácil o hardened?
+
+2. **SUPERFICIE DE ATAQUE**: 
+   - Puertos abiertos y servicios identificados
+   - Versiones de software detectadas (si hay versiones vulnerables conocidas, mencionarlas)
+   - Fingerprinting del sistema operativo si es posible
+
+3. **VULNERABILIDADES Y CVEs**:
+   - Identifica vulnerabilidades conocidas basándote en las versiones de servicios
+   - Menciona CVEs específicos si aplican
+   - Clasifica por severidad (Crítico, Alto, Medio, Bajo)
+
+4. **VECTORES DE ATAQUE POTENCIALES**:
+   - Cómo podría un atacante explotar cada servicio vulnerable
+   - Técnicas de explotación aplicables (ej: brute force, exploit público, misconfig)
+   - Herramientas que se usarían (metasploit, hydra, etc.)
+
+5. **MISCONFIGURATIONS**:
+   - Servicios que no deberían estar expuestos
+   - Headers de seguridad faltantes
+   - Configuraciones por defecto detectadas
+
+6. **RECOMENDACIONES DE REMEDIACIÓN**:
+   - Acciones prioritarias para el administrador
+   - Hardening específico por servicio
+
+7. **CONCLUSIÓN**: Nivel de riesgo global (Crítico/Alto/Medio/Bajo) con justificación.
+
+Responde en español, formato texto plano con secciones claras. Sé técnico y específico."""
 
         add_log("Conectando a Ollama (puede tardar)...", "searching")
         # Quick health check: is the `ollama` process reachable?
@@ -201,11 +215,11 @@ Reglas estrictas:
         max_retries = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
         for attempt in range(max_retries):
             try:
-                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando ollama...", "searching")
+                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando WhiteRabbitNeo...", "searching")
                 
                 # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
-                ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "300"))
-                cmd = ["ollama", "run", "llama3.2:1b", "--verbose", "--hidethinking", "--keepalive", "5m"]
+                ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
+                cmd = ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "5m"]
                 add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
                 start_time = time.time()
                 process = subprocess.run(
@@ -254,8 +268,8 @@ Reglas estrictas:
                     add_log(detail, "error")
                     # If the error looks like OOM/killed, attempt fallback model if available
                     if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-                        fallback = select_fallback_model("llama3.2:1b")
-                        if fallback and fallback != "llama3.2:1b":
+                        fallback = select_fallback_model("WhiteRabbitNeo/WhiteRabbitNeo-V3-7B")
+                        if fallback and fallback != "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B":
                             add_log(f"Intentando fallback con modelo {fallback}", "searching")
                             try:
                                 fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
@@ -581,11 +595,11 @@ async def ollama_debug():
     try:
         # Ejecutar un run corto con timeout limitado
         run_proc = subprocess.run(
-            ["ollama", "run", "llama3.2:1b", "--verbose", "--hidethinking", "--keepalive", "1m"],
+            ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "1m"],
             input="Ping",
             text=True,
             capture_output=True,
-            timeout=20
+            timeout=60
         )
         run_out = strip_ansi_sequences(run_proc.stdout)
         run_err = strip_ansi_sequences(run_proc.stderr)
@@ -656,7 +670,7 @@ def diagnose_ollama_error(stderr_clean: str) -> str:
     if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
         return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
     if "model not found" in lower or "no such model" in lower or "not found" in lower:
-        return "Modelo no encontrado - ejecuta `ollama pull llama3.2:1b`"
+        return "Modelo no encontrado - ejecuta `ollama pull WhiteRabbitNeo/WhiteRabbitNeo-V3-7B`"
     if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
         return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
     if "permission denied" in lower:

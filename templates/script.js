@@ -344,51 +344,9 @@ function pollJobLogs(jobId) {
     }, 500); // Polling cada 500ms
 }
 
-// Efecto typewriter estilo ChatGPT
-let currentTypewriterInterval = null;
-
-function typewriterEffect(element, text, speed = 15) {
-    // Cancelar cualquier efecto anterior
-    if (currentTypewriterInterval) {
-        clearInterval(currentTypewriterInterval);
-    }
-    
-    element.textContent = '';
-    element.classList.add('typing');
-    
-    let index = 0;
-    const textLength = text.length;
-    
-    // Velocidad adaptativa: más rápido para textos largos
-    const adaptiveSpeed = textLength > 2000 ? 5 : textLength > 1000 ? 10 : speed;
-    
-    // Escribir varios caracteres a la vez para textos muy largos
-    const charsPerTick = textLength > 3000 ? 3 : textLength > 1500 ? 2 : 1;
-    
-    return new Promise((resolve) => {
-        currentTypewriterInterval = setInterval(() => {
-            if (index < textLength) {
-                // Agregar caracteres
-                const endIndex = Math.min(index + charsPerTick, textLength);
-                element.textContent += text.substring(index, endIndex);
-                index = endIndex;
-                
-                // Auto-scroll suave
-                element.scrollTop = element.scrollHeight;
-            } else {
-                clearInterval(currentTypewriterInterval);
-                currentTypewriterInterval = null;
-                element.classList.remove('typing');
-                resolve();
-            }
-        }, adaptiveSpeed);
-    });
-}
-
 function displayResults(data) {
-    // Tab Análisis - con efecto typewriter
-    const analysisElement = document.getElementById('analysisText');
-    typewriterEffect(analysisElement, data.analysis, 12);
+    // Tab Análisis
+    document.getElementById('analysisText').textContent = data.analysis;
     
     // Tab Nmap
     document.getElementById('nmapOutput').textContent = data.nmap_output;
