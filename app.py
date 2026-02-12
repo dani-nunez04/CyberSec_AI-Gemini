@@ -86,17 +86,17 @@ app.add_middleware(
 async def warm_ollama():
     def _warm():
         try:
-            add_log("Warmup: pre-cargando modelo WhiteRabbitNeo-V3-7B", "info")
+            add_log("Warmup: pre-cargando modelo llama3.2:3b-instruct-q5_K_M ", "info")
             # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
             subprocess.run([
                 "ollama",
                 "run",
-                "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B",
+                "llama3.2:3b-instruct-q5_K_M",
                 "--hidethinking",
                 "--keepalive",
                 "5m"
             ], input="Warmup", text=True, capture_output=True, timeout=60)
-            add_log("Warmup WhiteRabbitNeo completado", "info")
+            add_log("Warmup llama3.2:3b-instruct-q5_K_M  completado", "info")
         except Exception as e:
             add_log(f"Warmup Ollama falló: {str(e)}", "error")
     executor.submit(_warm)
@@ -153,11 +153,11 @@ def scan_target(ip: str, scan_type: str = "basic") -> str:
 
 
 def analyze_with_ollama(scan_output: str, ip: str) -> str:
-    """Analiza el output de Nmap con WhiteRabbitNeo (modelo especializado en pentesting)"""
+    """Analiza el output de Nmap con llama3.2:3b-instruct-q5_K_M  (modelo especializado en pentesting)"""
     try:
-        add_log(f"Iniciando análisis con WhiteRabbitNeo para {ip}", "searching")
+        add_log(f"Iniciando análisis con llama3.2:3b-instruct-q5_K_M  para {ip}", "searching")
         
-        prompt = f"""Eres WhiteRabbitNeo, un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
+        prompt = f"""Eres llama3.2:3b-instruct-q5_K_M , un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
 
 ## RESULTADOS DEL ESCANEO NMAP:
 {scan_output}
@@ -215,11 +215,11 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
         max_retries = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
         for attempt in range(max_retries):
             try:
-                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando WhiteRabbitNeo...", "searching")
+                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando llama3.2:3b-instruct-q5_K_M ...", "searching")
                 
                 # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
                 ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
-                cmd = ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "5m"]
+                cmd = ["ollama", "run", "llama3.2:3b-instruct-q5_K_M", "--verbose", "--hidethinking", "--keepalive", "5m"]
                 add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
                 start_time = time.time()
                 process = subprocess.run(
@@ -268,8 +268,8 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
                     add_log(detail, "error")
                     # If the error looks like OOM/killed, attempt fallback model if available
                     if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-                        fallback = select_fallback_model("WhiteRabbitNeo/WhiteRabbitNeo-V3-7B")
-                        if fallback and fallback != "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B":
+                        fallback = select_fallback_model("llama3.2:3b-instruct-q5_K_M")
+                        if fallback and fallback != "llama3.2:3b-instruct-q5_K_M":
                             add_log(f"Intentando fallback con modelo {fallback}", "searching")
                             try:
                                 fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
@@ -595,7 +595,7 @@ async def ollama_debug():
     try:
         # Ejecutar un run corto con timeout limitado
         run_proc = subprocess.run(
-            ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "1m"],
+            ["ollama", "run", "llama3.2:3b-instruct-q5_K_M", "--verbose", "--hidethinking", "--keepalive", "1m"],
             input="Ping",
             text=True,
             capture_output=True,
@@ -670,7 +670,7 @@ def diagnose_ollama_error(stderr_clean: str) -> str:
     if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
         return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
     if "model not found" in lower or "no such model" in lower or "not found" in lower:
-        return "Modelo no encontrado - ejecuta `ollama pull WhiteRabbitNeo/WhiteRabbitNeo-V3-7B`"
+        return "Modelo no encontrado - ejecuta `ollama pull llama3.2:3b-instruct-q5_K_M`"
     if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
         return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
     if "permission denied" in lower:
