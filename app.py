@@ -90,29 +90,16 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b-instruct-q5_K_M")
 async def warm_ollama():
     def _warm():
         try:
-<<<<<<< HEAD
             add_log(f"Warmup: pre-cargando modelo {OLLAMA_MODEL}", "info")
-=======
-            add_log("Warmup: pre-cargando modelo llama3.2:3b-instruct-q5_K_M ", "info")
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
             # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
             subprocess.run([
                 "ollama",
                 "run",
-<<<<<<< HEAD
                 OLLAMA_MODEL,
                 "--keepalive",
                 "5m"
             ], input="Warmup", text=True, capture_output=True, timeout=60)
             add_log(f"Warmup {OLLAMA_MODEL} completado", "info")
-=======
-                "llama3.2:3b-instruct-q5_K_M",
-                "--hidethinking",
-                "--keepalive",
-                "5m"
-            ], input="Warmup", text=True, capture_output=True, timeout=60)
-            add_log("Warmup llama3.2:3b-instruct-q5_K_M  completado", "info")
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
         except Exception as e:
             add_log(f"Warmup Ollama falló: {str(e)}", "error")
     executor.submit(_warm)
@@ -169,19 +156,11 @@ def scan_target(ip: str, scan_type: str = "basic") -> str:
 
 
 def analyze_with_ollama(scan_output: str, ip: str) -> str:
-<<<<<<< HEAD
     """Analiza el output de Nmap con el modelo de IA configurado"""
     try:
         add_log(f"Iniciando análisis con {OLLAMA_MODEL} para {ip}", "searching")
         
         prompt = f"""Eres un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
-=======
-    """Analiza el output de Nmap con llama3.2:3b-instruct-q5_K_M  (modelo especializado en pentesting)"""
-    try:
-        add_log(f"Iniciando análisis con llama3.2:3b-instruct-q5_K_M  para {ip}", "searching")
-        
-        prompt = f"""Eres llama3.2:3b-instruct-q5_K_M , un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
 
 ## RESULTADOS DEL ESCANEO NMAP:
 {scan_output}
@@ -239,19 +218,11 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
         max_retries = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
         for attempt in range(max_retries):
             try:
-<<<<<<< HEAD
                 add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando {OLLAMA_MODEL}...", "searching")
                 
                 # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
                 ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
                 cmd = ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "5m"]
-=======
-                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando llama3.2:3b-instruct-q5_K_M ...", "searching")
-                
-                # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
-                ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
-                cmd = ["ollama", "run", "llama3.2:3b-instruct-q5_K_M", "--verbose", "--hidethinking", "--keepalive", "5m"]
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
                 add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
                 start_time = time.time()
                 process = subprocess.run(
@@ -300,13 +271,8 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
                     add_log(detail, "error")
                     # If the error looks like OOM/killed, attempt fallback model if available
                     if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-<<<<<<< HEAD
                         fallback = select_fallback_model(OLLAMA_MODEL)
                         if fallback and fallback != OLLAMA_MODEL:
-=======
-                        fallback = select_fallback_model("llama3.2:3b-instruct-q5_K_M")
-                        if fallback and fallback != "llama3.2:3b-instruct-q5_K_M":
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
                             add_log(f"Intentando fallback con modelo {fallback}", "searching")
                             try:
                                 fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
@@ -632,11 +598,7 @@ async def ollama_debug():
     try:
         # Ejecutar un run corto con timeout limitado
         run_proc = subprocess.run(
-<<<<<<< HEAD
             ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "1m"],
-=======
-            ["ollama", "run", "llama3.2:3b-instruct-q5_K_M", "--verbose", "--hidethinking", "--keepalive", "1m"],
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
             input="Ping",
             text=True,
             capture_output=True,
@@ -711,11 +673,7 @@ def diagnose_ollama_error(stderr_clean: str) -> str:
     if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
         return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
     if "model not found" in lower or "no such model" in lower or "not found" in lower:
-<<<<<<< HEAD
         return f"Modelo no encontrado - ejecuta `ollama pull {OLLAMA_MODEL}`"
-=======
-        return "Modelo no encontrado - ejecuta `ollama pull llama3.2:3b-instruct-q5_K_M`"
->>>>>>> a5c44cdf35ad49fb484a5a8c910afea8af4b70e9
     if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
         return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
     if "permission denied" in lower:
