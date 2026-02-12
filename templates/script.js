@@ -196,88 +196,152 @@ function fetchAnalysis(targetIp) {
     };
     
     const apiUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? `http://localhost:8001/api/analyze`
-        : `${window.location.origin}/api/analyze`;
+        ? `http://localhost:8001/api/analyze-stream`
+        : `${window.location.origin}/api/analyze-stream`;
     
     // Agregar logs iniciales
     addInvestigationLog(`<strong>Iniciando análisis de ${targetIp}</strong>`, 'searching');
     const scanTypeText = state.scanType === 'basic' ? 'Escaneo Básico' : 'Escaneo Profundo';
     addInvestigationLog(`Tipo de escaneo: <strong>${scanTypeText}</strong>`, 'searching');
-    addInvestigationLog(`Conectando a API...`, 'searching');
+    addInvestigationLog(`Conectando a API (streaming)...`, 'searching');
     
-    // Crear AbortController con timeout de 30 minutos (1800000ms)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1800000);
+    // Preparar el área de análisis para streaming
+    const analysisText = document.getElementById('analysisText');
+    analysisText.innerHTML = '';
+    analysisText.classList.add('streaming');
     
+    // Estado del streaming
+    state.currentAnalysis = {
+        nmap_output: '',
+        analysis: '',
+        exploits: [],
+        services: []
+    };
+    
+    // Usar fetch con streaming
     fetch(apiUrl, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
-        signal: controller.signal
+        body: JSON.stringify(payload)
     })
     .then(response => {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        return response.json();
-    })
-    .then(data => {
-        clearTimeout(timeoutId);
         
-        // La API ahora retorna un job_id encriptado en nmap_output
-        // Extraemos el job_id si está disponible
-        const jobIdMatch = data.nmap_output?.match(/Job ([a-f0-9-]+) encolado/);
-        if (jobIdMatch && jobIdMatch[1]) {
-            state.currentJobId = jobIdMatch[1];
-            addInvestigationLog(`✓ Job encolado: ${state.currentJobId.substring(0, 8)}...`, 'success');
-            
-            // Iniciar polling de logs por job
-            pollJobLogs(state.currentJobId);
-        } else {
-            // Fallback: si no hay job_id, mostrar datos directamente (compatible con versión anterior)
-            state.currentAnalysis = data;
-            loadingIndicator.classList.remove('show');
-            addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
-            
-            setTimeout(() => {
-                hideInvestigationPanel();
-                displayResults(data);
-                switchTab('analysis');
-            }, 800);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        function processStream() {
+            return reader.read().then(({ done, value }) => {
+                if (done) {
+                    analysisText.classList.remove('streaming');
+                    loadingIndicator.classList.remove('show');
+                    addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
+                    setTimeout(() => {
+                        hideInvestigationPanel();
+                        switchTab('analysis');
+                    }, 800);
+                    return;
+                }
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Guardar línea incompleta
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            handleStreamEvent(data, analysisText);
+                        } catch (e) {
+                            console.error('Error parsing stream:', e);
+                        }
+                    }
+                }
+                
+                return processStream();
+            });
         }
+        
+        return processStream();
     })
     .catch(error => {
-        clearTimeout(timeoutId);
+        analysisText.classList.remove('streaming');
         loadingIndicator.classList.remove('show');
         console.error('Error:', error);
         
         addInvestigationLog(`Error: ${error.message}`, 'error');
         
-        let errorMsg = error.message;
-        let suggestion = '';
-        
-        if (error.message.includes('504') || error.message.includes('timeout')) {
-            suggestion = '<br><strong>Tip:</strong> El análisis tardó demasiado. Intenta:<br>• Usar Escaneo Básico en lugar de Profundo<br>• Esperar a que Ollama termine (checa la terminal)';
-        } else if (error.message.includes('500')) {
-            suggestion = '<br><strong>Tip:</strong> Error en el servidor. Verifica:<br>• Logs de FastAPI en la terminal<br>• Que Nmap y Ollama estén instalados';
-        }
-        
         document.getElementById('analysis-tab').innerHTML = `
             <div style="color: #ff6b6b; padding: 20px; border-radius: 8px; background: rgba(255,107,107,0.1); border: 1px solid rgba(255,107,107,0.3);">
                 <strong>❌ Error en la conexión:</strong><br>
-                ${errorMsg}
-                ${suggestion}<br><br>
+                ${error.message}<br><br>
                 <strong>Requisitos:</strong><br>
                 • FastAPI corriendo en http://localhost:8001<br>
                 • Ollama activo (ollama serve)<br>
-                • Nmap instalado (sudo apt install nmap)<br>
-                • Puertos 8001 disponibles
+                • Nmap instalado (sudo apt install nmap)
             </div>
         `;
         switchTab('analysis');
     });
+}
+
+function handleStreamEvent(data, analysisText) {
+    switch(data.type) {
+        case 'status':
+            addInvestigationLog(data.content, 'searching');
+            break;
+            
+        case 'nmap_complete':
+            state.currentAnalysis.nmap_output = data.content;
+            document.getElementById('nmapOutput').textContent = data.content;
+            addInvestigationLog('✓ Escaneo Nmap completado', 'success');
+            break;
+            
+        case 'services':
+            state.currentAnalysis.services = data.content;
+            addInvestigationLog(`✓ ${data.content.length} servicios detectados`, 'success');
+            break;
+            
+        case 'analysis_start':
+            addInvestigationLog('Generando análisis con IA...', 'searching');
+            break;
+            
+        case 'token':
+            // Añadir token al análisis con efecto de typing
+            state.currentAnalysis.analysis += data.content;
+            analysisText.textContent = state.currentAnalysis.analysis;
+            // Auto-scroll al final
+            analysisText.scrollTop = analysisText.scrollHeight;
+            break;
+            
+        case 'exploits':
+            state.currentAnalysis.exploits = data.content;
+            displayExploits(data.content);
+            const totalExploits = data.content.reduce((sum, g) => sum + (g.exploits?.length || 0), 0);
+            addInvestigationLog(`✓ ${totalExploits} exploits encontrados`, 'success');
+            break;
+            
+        case 'done':
+            // Análisis de IA completado
+            addInvestigationLog('✓ Análisis de IA completado', 'success');
+            break;
+            
+        case 'complete':
+            // Todo completado
+            if (data.analysis) {
+                state.currentAnalysis.analysis = data.analysis;
+            }
+            break;
+            
+        case 'error':
+            addInvestigationLog(`Error: ${data.content}`, 'error');
+            break;
+    }
 }
 
 function pollJobLogs(jobId) {

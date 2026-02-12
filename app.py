@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ import concurrent.futures
 import time
 import difflib
 import re
+import httpx
 
 # Intentar importar exploitdb_search; si falla, se usará la versión simplificada
 try:
@@ -82,21 +83,23 @@ app.add_middleware(
 )
 
 # Warmup: pre-carga del modelo Ollama al arrancar para evitar latencia en la primera petición
+# Modelo principal de Ollama (configurable)
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b-instruct-q5_K_M")
+
 @app.on_event("startup")
 async def warm_ollama():
     def _warm():
         try:
-            add_log("Warmup: pre-cargando modelo WhiteRabbitNeo-V3-7B", "info")
+            add_log(f"Warmup: pre-cargando modelo {OLLAMA_MODEL}", "info")
             # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
             subprocess.run([
                 "ollama",
                 "run",
-                "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B",
-                "--hidethinking",
+                OLLAMA_MODEL,
                 "--keepalive",
                 "5m"
             ], input="Warmup", text=True, capture_output=True, timeout=60)
-            add_log("Warmup WhiteRabbitNeo completado", "info")
+            add_log(f"Warmup {OLLAMA_MODEL} completado", "info")
         except Exception as e:
             add_log(f"Warmup Ollama falló: {str(e)}", "error")
     executor.submit(_warm)
@@ -153,11 +156,11 @@ def scan_target(ip: str, scan_type: str = "basic") -> str:
 
 
 def analyze_with_ollama(scan_output: str, ip: str) -> str:
-    """Analiza el output de Nmap con WhiteRabbitNeo (modelo especializado en pentesting)"""
+    """Analiza el output de Nmap con el modelo de IA configurado"""
     try:
-        add_log(f"Iniciando análisis con WhiteRabbitNeo para {ip}", "searching")
+        add_log(f"Iniciando análisis con {OLLAMA_MODEL} para {ip}", "searching")
         
-        prompt = f"""Eres WhiteRabbitNeo, un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
+        prompt = f"""Eres un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
 
 ## RESULTADOS DEL ESCANEO NMAP:
 {scan_output}
@@ -215,11 +218,11 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
         max_retries = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
         for attempt in range(max_retries):
             try:
-                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando WhiteRabbitNeo...", "searching")
+                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando {OLLAMA_MODEL}...", "searching")
                 
                 # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
                 ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
-                cmd = ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "5m"]
+                cmd = ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "5m"]
                 add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
                 start_time = time.time()
                 process = subprocess.run(
@@ -268,8 +271,8 @@ Responde en español, formato texto plano con secciones claras. Sé técnico y e
                     add_log(detail, "error")
                     # If the error looks like OOM/killed, attempt fallback model if available
                     if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-                        fallback = select_fallback_model("WhiteRabbitNeo/WhiteRabbitNeo-V3-7B")
-                        if fallback and fallback != "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B":
+                        fallback = select_fallback_model(OLLAMA_MODEL)
+                        if fallback and fallback != OLLAMA_MODEL:
                             add_log(f"Intentando fallback con modelo {fallback}", "searching")
                             try:
                                 fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
@@ -595,7 +598,7 @@ async def ollama_debug():
     try:
         # Ejecutar un run corto con timeout limitado
         run_proc = subprocess.run(
-            ["ollama", "run", "WhiteRabbitNeo/WhiteRabbitNeo-V3-7B", "--verbose", "--hidethinking", "--keepalive", "1m"],
+            ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "1m"],
             input="Ping",
             text=True,
             capture_output=True,
@@ -670,7 +673,7 @@ def diagnose_ollama_error(stderr_clean: str) -> str:
     if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
         return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
     if "model not found" in lower or "no such model" in lower or "not found" in lower:
-        return "Modelo no encontrado - ejecuta `ollama pull WhiteRabbitNeo/WhiteRabbitNeo-V3-7B`"
+        return f"Modelo no encontrado - ejecuta `ollama pull {OLLAMA_MODEL}`"
     if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
         return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
     if "permission denied" in lower:
@@ -786,6 +789,157 @@ async def analyze_target(request: PentestRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creando job: {str(e)}")
+
+
+# ==================== ENDPOINT DE STREAMING ====================
+
+class StreamAnalysisRequest(BaseModel):
+    target_ip: str
+    scan_type: str = "basic"
+    nmap_output: str = ""  # Opcional: si ya tienes el output de nmap
+
+
+async def stream_ollama_analysis(prompt: str):
+    """Genera tokens de streaming desde Ollama API"""
+    ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
+        try:
+            async with client.stream(
+                "POST",
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": True
+                }
+            ) as response:
+                async for line in response.aiter_lines():
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            if "response" in data:
+                                yield f"data: {json.dumps({'type': 'token', 'content': data['response']})}\n\n"
+                            if data.get("done", False):
+                                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                                break
+                        except json.JSONDecodeError:
+                            continue
+        except httpx.TimeoutException:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Timeout en conexión con Ollama'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+
+@app.post("/api/analyze-stream")
+async def analyze_stream(request: StreamAnalysisRequest):
+    """Endpoint de streaming: devuelve el análisis token por token usando SSE"""
+    
+    target_ip = request.target_ip
+    scan_type = request.scan_type
+    
+    async def event_generator():
+        try:
+            # Paso 1: Escaneo Nmap (si no se proporcionó)
+            if not request.nmap_output:
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Iniciando escaneo Nmap...'})}\n\n"
+                
+                # Ejecutar nmap de forma asíncrona
+                if scan_type == "basic":
+                    cmd = ["sudo", "nmap", "-sV", "-T4", target_ip]
+                else:
+                    cmd = ["sudo", "nmap", "-sV", "-sC", "-T3", target_ip]
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                nmap_output = stdout.decode('utf-8', errors='replace')
+                
+                if not nmap_output.strip():
+                    nmap_output = f"[INFO] Sin output. STDERR: {stderr.decode('utf-8', errors='replace')}"
+                
+                yield f"data: {json.dumps({'type': 'nmap_complete', 'content': nmap_output})}\n\n"
+            else:
+                nmap_output = request.nmap_output
+                yield f"data: {json.dumps({'type': 'nmap_complete', 'content': nmap_output})}\n\n"
+            
+            # Paso 2: Extraer servicios
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Extrayendo servicios...'})}\n\n"
+            services = extract_services(nmap_output)
+            yield f"data: {json.dumps({'type': 'services', 'content': services})}\n\n"
+            
+            # Paso 3: Análisis con streaming
+            yield f"data: {json.dumps({'type': 'status', 'content': f'Analizando con {OLLAMA_MODEL}...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'analysis_start'})}\n\n"
+            
+            prompt = f"""Eres un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {target_ip}.
+
+## RESULTADOS DEL ESCANEO NMAP:
+{nmap_output}
+
+## INSTRUCCIONES DE ANÁLISIS:
+Proporciona un análisis exhaustivo desde la perspectiva de un pentester profesional:
+
+1. **RESUMEN EJECUTIVO**: Valoración rápida del objetivo - ¿qué tan expuesto está?
+
+2. **SUPERFICIE DE ATAQUE**: 
+   - Puertos abiertos y servicios identificados
+   - Versiones de software detectadas
+
+3. **VULNERABILIDADES Y CVEs**:
+   - Identifica vulnerabilidades conocidas
+   - Menciona CVEs específicos si aplican
+   - Clasifica por severidad (Crítico, Alto, Medio, Bajo)
+
+4. **VECTORES DE ATAQUE POTENCIALES**:
+   - Cómo podría un atacante explotar cada servicio
+   - Herramientas que se usarían (metasploit, hydra, etc.)
+
+5. **RECOMENDACIONES DE REMEDIACIÓN**:
+   - Acciones prioritarias para el administrador
+   - Hardening específico por servicio
+
+6. **CONCLUSIÓN**: Nivel de riesgo global (Crítico/Alto/Medio/Bajo) con justificación.
+
+Responde en español, formato texto plano con secciones claras. Sé técnico y específico."""
+
+            # Stream del análisis
+            full_analysis = ""
+            async for chunk in stream_ollama_analysis(prompt):
+                yield chunk
+                # Extraer contenido para guardar
+                try:
+                    if "token" in chunk:
+                        data = json.loads(chunk.replace("data: ", "").strip())
+                        if data.get("type") == "token":
+                            full_analysis += data.get("content", "")
+                except:
+                    pass
+            
+            # Paso 4: Buscar exploits
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Buscando exploits...'})}\n\n"
+            exploits = get_exploits(services)
+            yield f"data: {json.dumps({'type': 'exploits', 'content': exploits})}\n\n"
+            
+            # Finalizar
+            yield f"data: {json.dumps({'type': 'complete', 'analysis': full_analysis})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 @app.post("/api/save-report")
 async def save_report(request: Request):
