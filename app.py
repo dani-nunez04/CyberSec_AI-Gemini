@@ -19,6 +19,8 @@ import time
 import difflib
 import re
 import httpx
+import google.generativeai as genai
+from dotenv import load_dotenv
 
 # Intentar importar exploitdb_search; si falla, se usará la versión simplificada
 try:
@@ -34,9 +36,20 @@ from discord_webhook import discord_webhook
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuración por variables de entorno
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "300"))  # segundos
-OLLAMA_MAX_RETRIES = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
+# Cargar variables de entorno
+load_dotenv()
+
+# Configuración de Gemini
+GEMINI_API_KEY = os.getenv("GEMINI_API")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API no configurada en .env")
+
+# Configurar la API de Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Timeouts y reintentos
+GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "120"))  # segundos
+GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
 
 # Sistema de logs para el frontend
 analysis_logs = deque(maxlen=100)  # Guardar últimos 100 logs (global)
@@ -82,26 +95,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Warmup: pre-carga del modelo Ollama al arrancar para evitar latencia en la primera petición
-# Modelo principal de Ollama (configurable)
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b-instruct-q5_K_M")
+# Modelo Gemini a utilizar
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
 @app.on_event("startup")
-async def warm_ollama():
+async def warmup_gemini():
     def _warm():
         try:
-            add_log(f"Warmup: pre-cargando modelo {OLLAMA_MODEL}", "info")
-            # Ejecuta un run corto para mantener el modelo en memoria (keepalive)
-            subprocess.run([
-                "ollama",
-                "run",
-                OLLAMA_MODEL,
-                "--keepalive",
-                "5m"
-            ], input="Warmup", text=True, capture_output=True, timeout=60)
-            add_log(f"Warmup {OLLAMA_MODEL} completado", "info")
+            add_log(f"Inicializando Gemini {GEMINI_MODEL}...", "info")
+            # Test rápido de la API de Gemini
+            model = genai.GenerativeModel(GEMINI_MODEL)
+            response = model.generate_content("Hola", stream=False)
+            add_log(f"Warmup de Gemini completado", "info")
         except Exception as e:
-            add_log(f"Warmup Ollama falló: {str(e)}", "error")
+            # Warmup error no es crítico - log pero continuar
+            add_log(f"Nota: Warmup Gemini tuvo issue (continuando): {str(e)[:100]}", "info")
     executor.submit(_warm)
 
 class PentestRequest(BaseModel):
@@ -155,10 +163,10 @@ def scan_target(ip: str, scan_type: str = "basic") -> str:
         raise HTTPException(status_code=500, detail=f"Nmap error: {str(e)}")
 
 
-def analyze_with_ollama(scan_output: str, ip: str) -> str:
-    """Analiza el output de Nmap con el modelo de IA configurado"""
+def analyze_with_gemini(scan_output: str, ip: str) -> str:
+    """Analiza el output de Nmap con Gemini API"""
     try:
-        add_log(f"Iniciando análisis con {OLLAMA_MODEL} para {ip}", "searching")
+        add_log(f"Iniciando análisis con {GEMINI_MODEL} para {ip}", "searching")
         
         prompt = f"""Eres un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {ip}.
 
@@ -196,139 +204,58 @@ Proporciona un análisis exhaustivo desde la perspectiva de un pentester profesi
 
 7. **CONCLUSIÓN**: Nivel de riesgo global (Crítico/Alto/Medio/Bajo) con justificación.
 
-Responde en español, formato texto plano con secciones claras. Sé técnico y específico."""
+Responde en español y en Markdown limpio.
+Reglas de formato obligatorias:
+- Usa encabezados Markdown (##, ###), listas y tablas cuando aporten claridad.
+- NO uses bloques de código con ``` ni comillas triples '''.
+- NO encierres toda la respuesta en un bloque de código.
+- Entrega texto renderizable directamente en la interfaz.
+Sé técnico, específico y prioriza evidencia verificable."""
 
-        add_log("Conectando a Ollama (puede tardar)...", "searching")
-        # Quick health check: is the `ollama` process reachable?
-        try:
-            ls_check = subprocess.run(["ollama", "ls"], capture_output=True, text=True, timeout=4)
-            if ls_check.returncode != 0:
-                stderr_clean = strip_ansi_sequences(ls_check.stderr)
-                diagnosis = diagnose_ollama_error(stderr_clean)
-                add_log(f"Ollama unreachable: {stderr_clean[:200]} - {diagnosis}", "error")
-                raise HTTPException(status_code=503, detail=f"Ollama not responding: {diagnosis}")
-        except FileNotFoundError:
-            add_log("Error: Ollama no encontrado", "error")
-            raise HTTPException(status_code=500, detail="Ollama no está instalado. Descárgalo desde ollama.ai")
-        except subprocess.TimeoutExpired:
-            add_log("Ollama ls timeout (servicio provavelmente no disponible)", "error")
-            raise HTTPException(status_code=504, detail="Ollama ls timeout - ensure `ollama serve` is running")
+        add_log(f"Conectando a Gemini API...", "searching")
         
-        # Intentar conexión a Ollama con reintentos (configurable vía env)
-        max_retries = int(os.getenv("OLLAMA_MAX_RETRIES", "3"))
+        # Intentar llamada a Gemini con reintentos
+        max_retries = GEMINI_MAX_RETRIES
         for attempt in range(max_retries):
             try:
-                add_log(f"Intento {attempt + 1}/{max_retries}: Ejecutando {OLLAMA_MODEL}...", "searching")
+                add_log(f"Intento {attempt + 1}/{max_retries}: Enviando a {GEMINI_MODEL}...", "searching")
                 
-                # Timeout configurable per call (seconds) via OLLAMA_TIMEOUT (default 300s)
-                ollama_timeout = int(os.getenv("OLLAMA_TIMEOUT", "600"))
-                cmd = ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "5m"]
-                add_log(f"Ejecutando comando: {' '.join(cmd)}", "info")
                 start_time = time.time()
-                process = subprocess.run(
-                    cmd,
-                    input=prompt,
-                    text=True,
-                    capture_output=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=ollama_timeout
-                )
+                # Gemini API requiere el formato models/gemini-xxx
+                model_name = GEMINI_MODEL if GEMINI_MODEL.startswith("models/") else f"models/{GEMINI_MODEL}"
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt, stream=False)
                 duration = time.time() - start_time
-                add_log(f"Ollama run duró {duration:.1f}s (returncode={process.returncode})", "info")
                 
-                # Log for debugging - strip ANSI escape sequences to improve readability
-                stderr_clean = strip_ansi_sequences(process.stderr)
-                stdout_clean = strip_ansi_sequences(process.stdout)
-                if process.returncode != 0:
-                    # Detect common failure modes in stderr
-                    lowered_err = stderr_clean.lower()
-                    if "killed" in lowered_err or "oom" in lowered_err or "out of memory" in lowered_err:
-                        add_log("Ollama likely killed due to OOM", "error")
-                    elif "model not found" in lowered_err or "no such model" in lowered_err or "not found" in lowered_err:
-                        add_log("Ollama model not found - pull the model (ollama pull)", "error")
-                    elif "connection refused" in lowered_err or "connection error" in lowered_err or "cannot connect" in lowered_err:
-                        add_log("Ollama connection error - ensure `ollama serve` is running", "error")
-                    diagnosis = diagnose_ollama_error(stderr_clean)
-                    add_log(f"Ollama returncode={process.returncode} stderr={stderr_clean[:300]} - {diagnosis}", "error")
-                else:
-                    add_log("Ollama returned successfully", "info")
-
-                if process.returncode == 0 and process.stdout.strip():
+                add_log(f"Gemini respondió en {duration:.1f}s", "info")
+                
+                if response and response.text:
                     add_log("Análisis completado", "success")
-                    return process.stdout.strip()
+                    return response.text.strip()
                 elif attempt < max_retries - 1:
-                    add_log(f"Reintentando... (intento {attempt + 2}/{max_retries})", "searching")
+                    add_log(f"Respuesta vacía, reintentando...", "searching")
+                    time.sleep(1)
                     continue
                 else:
-                    stderr_snippet = stderr_clean[:1000] if stderr_clean else ""
-                    stdout_snippet = stdout_clean[:1000] if stdout_clean else ""
-                    diagnosis = diagnose_ollama_error(stderr_snippet)
-                    detail = (
-                        f"Ollama returned non-zero (returncode={process.returncode}). "
-                        f"Diagnosis: {diagnosis}. STDERR: {stderr_snippet}. STDOUT: {stdout_snippet}"
-                    )
+                    detail = "Gemini retornó respuesta vacía después de varios intentos"
                     add_log(detail, "error")
-                    # If the error looks like OOM/killed, attempt fallback model if available
-                    if "oom" in stderr_snippet.lower() or "killed" in stderr_snippet.lower() or "signal: terminated" in stderr_snippet.lower():
-                        fallback = select_fallback_model(OLLAMA_MODEL)
-                        if fallback and fallback != OLLAMA_MODEL:
-                            add_log(f"Intentando fallback con modelo {fallback}", "searching")
-                            try:
-                                fb_cmd = ["ollama", "run", fallback, "--verbose", "--hidethinking", "--keepalive", "5m"]
-                                add_log(f"Ejecutando fallback comando: {' '.join(fb_cmd)}", "info")
-                                fb_start = time.time()
-                                fb_proc = subprocess.run(
-                                    fb_cmd,
-                                    input=prompt,
-                                    text=True,
-                                    capture_output=True,
-                                    timeout=120
-                                )
-                                fb_duration = time.time() - fb_start
-                                add_log(f"Fallback run duró {fb_duration:.1f}s (returncode={fb_proc.returncode})", "info")
-                                fb_stderr = strip_ansi_sequences(fb_proc.stderr)
-                                fb_stdout = strip_ansi_sequences(fb_proc.stdout)
-                                if fb_proc.returncode == 0 and fb_stdout.strip():
-                                    add_log(f"Fallback con {fallback} exitoso", "success")
-                                    return fb_stdout.strip()
-                                else:
-                                    add_log(f"Fallback con {fallback} también falló. returncode={fb_proc.returncode} stderr={fb_stderr[:300]}", "error")
-                            except subprocess.TimeoutExpired:
-                                add_log("Timeout en fallback model run", "error")
-                            except Exception as e:
-                                add_log(f"Fallback error: {str(e)}", "error")
                     raise Exception(detail)
                     
-            except subprocess.TimeoutExpired as e:
-                add_log("Ollama run timeout", "error")
-                if attempt < max_retries - 1:
-                    add_log("Reintentando por Timeout...", "searching")
-                    continue
-                else:
-                    raise Exception("Ollama run timeout después de reintentos")
             except Exception as e:
+                error_str = str(e)
                 if attempt < max_retries - 1:
-                    add_log(f"Error, reintentando: {str(e)[:50]}", "searching")
+                    add_log(f"Error en intento {attempt + 1}, reintentando: {error_str[:100]}", "searching")
+                    time.sleep(2)
                     continue
                 else:
+                    add_log(f"Error Gemini después de {max_retries} intentos: {error_str}", "error")
                     raise
         
-        cleaned_stderr = strip_ansi_sequences(process.stderr)
-        return process.stdout.strip() if process.stdout.strip() else f"[INFO] Ollama no retornó output. STDERR: {cleaned_stderr}"
-        
-    except FileNotFoundError:
-        add_log("Error: Ollama no encontrado", "error")
-        raise HTTPException(status_code=500, detail="Ollama no está instalado. Descárgalo desde ollama.ai")
     except Exception as e:
         err_str = str(e)
-        add_log(f"Error Ollama: {err_str}", "error")
+        add_log(f"Error Gemini: {err_str}", "error")
         truncated = err_str[:1000]
-        # Detect OOM/killed common patterns
-        lowered = truncated.lower()
-        if "killed" in lowered or "oom" in lowered or "out of memory" in lowered:
-            raise HTTPException(status_code=500, detail=f"Ollama likely OOM/killed: {truncated}")
-        raise HTTPException(status_code=500, detail=f"Ollama error: {truncated}")
+        raise HTTPException(status_code=500, detail=f"Gemini error: {truncated}")
 
 def extract_services(nmap_output: str) -> list:
     """Extrae servicios del output de Nmap"""
@@ -583,102 +510,33 @@ def strip_ansi_sequences(text: str) -> str:
     return cleaned.strip()
 
 
-@app.get("/api/ollama/debug")
-async def ollama_debug():
-    """Endpoint simple para diagnosticar Ollama: lista modelos y hace un run corto"""
+@app.get("/api/gemini/debug")
+async def gemini_debug():
+    """Endpoint simple para diagnosticar Gemini API"""
     try:
-        ls = subprocess.run(["ollama", "ls"], capture_output=True, text=True, timeout=5)
-        ls_out = strip_ansi_sequences(ls.stdout)
-        ls_err = strip_ansi_sequences(ls.stderr)
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Ollama no encontrado")
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Timeout ejecutando `ollama ls`")
-
-    try:
-        # Ejecutar un run corto con timeout limitado
-        run_proc = subprocess.run(
-            ["ollama", "run", OLLAMA_MODEL, "--verbose", "--keepalive", "1m"],
-            input="Ping",
-            text=True,
-            capture_output=True,
-            timeout=60
-        )
-        run_out = strip_ansi_sequences(run_proc.stdout)
-        run_err = strip_ansi_sequences(run_proc.stderr)
-    except subprocess.TimeoutExpired:
-        run_out = ""
-        run_err = "Timeout during run"
-        run_proc = None
+        add_log("Verificando conexión con Gemini API...", "info")
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        response = model.generate_content("Hola, realiza un test de conexión", stream=False)
+        
+        if response and response.text:
+            add_log("Gemini API funcionando correctamente", "success")
+            return {
+                "status": "success",
+                "model": GEMINI_MODEL,
+                "test_response": response.text[:200],
+                "message": "Gemini API funcionando correctamente"
+            }
+        else:
+            add_log("Gemini API retornó respuesta vacía", "error")
+            raise Exception("Gemini API retornó respuesta vacía")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando ollama run: {str(e)[:300]}")
-
-    return {
-        "ls_returncode": ls.returncode,
-        "ls_stdout": ls_out,
-        "ls_stderr": ls_err,
-        "run_returncode": run_proc.returncode if run_proc is not None else -1,
-        "run_stdout": run_out,
-        "run_stderr": run_err
-    }
+        error_msg = str(e)
+        add_log(f"Error en Gemini API: {error_msg}", "error")
+        raise HTTPException(status_code=500, detail=f"Gemini error: {error_msg[:300]}")
 
 
-def parse_model_size(model_name: str) -> float | None:
-    """Parse the size in model name like ':1.3b' -> 1.3. Return None if not found."""
-    import re
-    match = re.search(r":(\d+(?:\.\d+)?)b$", model_name)
-    if match:
-        try:
-            return float(match.group(1))
-        except Exception:
-            return None
-    return None
-
-
-def select_fallback_model(preferred_model: str) -> str | None:
-    """Return a fallback model name available via `ollama ls` that has a smaller size than preferred_model.
-    If no suitable fallback is found, return None.
-    """
-    try:
-        ls_proc = subprocess.run(["ollama", "ls"], capture_output=True, text=True, timeout=3)
-        if ls_proc.returncode != 0 or not ls_proc.stdout:
-            return None
-        models = [line.strip() for line in ls_proc.stdout.splitlines() if line.strip()]
-        # Parse preferred size
-        pref_size = parse_model_size(preferred_model) or float("inf")
-        # Candidates with sizes parsed and smaller than preferred
-        candidates = []
-        for m in models:
-            size = parse_model_size(m)
-            if size is not None and size < pref_size:
-                candidates.append((size, m))
-        if not candidates:
-            # If no smaller sized models, choose any model different from preferred
-            for m in models:
-                if m != preferred_model:
-                    return m
-            return None
-        # Pick the largest model among the smaller ones (closest size < preferred)
-        candidates.sort(reverse=True)
-        return candidates[0][1]
-    except Exception:
-        return None
-
-
-def diagnose_ollama_error(stderr_clean: str) -> str:
-    """Return a short diagnosis based on common patterns in Ollama stderr."""
-    if not stderr_clean:
-        return "Sin detalles proporcionados por Ollama"
-    lower = stderr_clean.lower()
-    if "killed" in lower or "oom" in lower or "out of memory" in lower or "runner process has terminated" in lower or "signal: terminated" in lower:
-        return "Posible OOM - reinicia `ollama serve` o asigna más RAM al modelo"
-    if "model not found" in lower or "no such model" in lower or "not found" in lower:
-        return f"Modelo no encontrado - ejecuta `ollama pull {OLLAMA_MODEL}`"
-    if "connection refused" in lower or "cannot connect" in lower or "connection error" in lower or "not responding" in lower or "could not connect" in lower:
-        return "Conexión a Ollama fallida - verifica `ollama serve` y puertos"
-    if "permission denied" in lower:
-        return "Permiso denegado - checa permisos de usuario/ejecución"
-    return "Error desconocido - revisa stderr para más detalles"
+# Funciones auxiliares eliminadas - se usaban solo para Ollama
+# (parse_model_size, select_fallback_model, diagnose_ollama_error)
 
 def perform_analysis(job_id: str, request: PentestRequest):
     """Realiza el análisis completo (ejecutado en background por el executor)"""
@@ -706,7 +564,7 @@ def perform_analysis(job_id: str, request: PentestRequest):
         
         # 3. Análisis con IA
         add_log("Paso 3/4: Analizando con IA...", "searching")
-        analysis_text = analyze_with_ollama(nmap_output, request.target_ip)
+        analysis_text = analyze_with_gemini(nmap_output, request.target_ip)
         add_log("Validando afirmaciones de la IA...", "searching")
         validated_analysis = validate_and_classify_analysis(analysis_text, nmap_output, services)
         
@@ -799,36 +657,19 @@ class StreamAnalysisRequest(BaseModel):
     nmap_output: str = ""  # Opcional: si ya tienes el output de nmap
 
 
-async def stream_ollama_analysis(prompt: str):
-    """Genera tokens de streaming desde Ollama API"""
-    ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    
-    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as client:
-        try:
-            async with client.stream(
-                "POST",
-                f"{ollama_url}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": True
-                }
-            ) as response:
-                async for line in response.aiter_lines():
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            if "response" in data:
-                                yield f"data: {json.dumps({'type': 'token', 'content': data['response']})}\n\n"
-                            if data.get("done", False):
-                                yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                                break
-                        except json.JSONDecodeError:
-                            continue
-        except httpx.TimeoutException:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Timeout en conexión con Ollama'})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+async def stream_gemini_analysis(prompt: str):
+    """Genera tokens de streaming desde Gemini API"""
+    try:
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        response = model.generate_content(prompt, stream=True)
+        
+        for chunk in response:
+            if chunk.text:
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk.text})}\n\n"
+        
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
 
 @app.post("/api/analyze-stream")
@@ -872,7 +713,7 @@ async def analyze_stream(request: StreamAnalysisRequest):
             yield f"data: {json.dumps({'type': 'services', 'content': services})}\n\n"
             
             # Paso 3: Análisis con streaming
-            yield f"data: {json.dumps({'type': 'status', 'content': f'Analizando con {OLLAMA_MODEL}...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'content': f'Analizando con {GEMINI_MODEL}...'})}\n\n"
             yield f"data: {json.dumps({'type': 'analysis_start'})}\n\n"
             
             prompt = f"""Eres un experto en ciberseguridad ofensiva y pentesting. Analiza los siguientes resultados de un escaneo Nmap para el objetivo {target_ip}.
@@ -904,11 +745,17 @@ Proporciona un análisis exhaustivo desde la perspectiva de un pentester profesi
 
 6. **CONCLUSIÓN**: Nivel de riesgo global (Crítico/Alto/Medio/Bajo) con justificación.
 
-Responde en español, formato texto plano con secciones claras. Sé técnico y específico."""
+Responde en español y en Markdown limpio.
+Reglas de formato obligatorias:
+- Usa encabezados Markdown (##, ###), listas y tablas cuando aporten claridad.
+- NO uses bloques de código con ``` ni comillas triples '''.
+- NO encierres toda la respuesta en un bloque de código.
+- Entrega texto renderizable directamente en la interfaz.
+Sé técnico, específico y prioriza evidencia verificable."""
 
             # Stream del análisis
             full_analysis = ""
-            async for chunk in stream_ollama_analysis(prompt):
+            async for chunk in stream_gemini_analysis(prompt):
                 yield chunk
                 # Extraer contenido para guardar
                 try:
@@ -1052,56 +899,7 @@ async def status():
     return {"status": "active", "message": "CyberSec AI API running"}
 
 
-@app.get("/api/ollama/health")
-async def ollama_health():
-    """Check if `ollama` is running and list the available models (quick health check)."""
-    try:
-        process = subprocess.run(["ollama", "ls"], capture_output=True, text=True, timeout=5)
-        if process.returncode == 0:
-            return {"status": "ok", "models": process.stdout.strip().splitlines()}
-        else:
-            diagnostic = diagnose_ollama_error(strip_ansi_sequences(process.stderr)[:500])
-            return {"status": "error", "stderr": strip_ansi_sequences(process.stderr)[:500], "returncode": process.returncode, "diagnosis": diagnostic}
-    except FileNotFoundError:
-        return {"status": "error", "detail": "ollama not found"}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "detail": "ollama ls timeout"}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}
-
-
-@app.post("/api/ollama/test-run")
-async def ollama_test_run(request: Request):
-    """Run a quick test Ollama prompt to validate if the model respond correctly.
-
-    Request JSON (optional): {"prompt": "Hello"}
-    """
-    data = await request.json()
-    prompt = data.get("prompt") if isinstance(data, dict) else None
-    if not prompt:
-        prompt = "Say hello and list numbers 1..3"
-
-    try:
-        add_log("Ejecutando prueba rápida de Ollama", "searching")
-        process = subprocess.run([
-            "ollama",
-            "run",
-            "llama3.2:1b"
-        ], input=prompt, capture_output=True, text=True, timeout=30)
-
-        diagnosis = diagnose_ollama_error(strip_ansi_sequences(process.stderr)[:2000] if process.stderr else "")
-        return {
-            "returncode": process.returncode,
-            "stdout": strip_ansi_sequences(process.stdout)[:2000] if process.stdout else "",
-            "stderr": strip_ansi_sequences(process.stderr)[:2000] if process.stderr else "",
-            "diagnosis": diagnosis,
-        }
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Ollama no encontrado")
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Ollama test-run timeout")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# Endpoints de Ollama eliminados - se usan ahora endpoints de Gemini
 
 @app.get("/api/jobs/{job_id}/status")
 async def get_job_status(job_id: str):

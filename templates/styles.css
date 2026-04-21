@@ -501,7 +501,7 @@ body::after {
 .analysis-text {
     line-height: 1.9;
     color: #ffffff;
-    white-space: pre-wrap;
+    white-space: normal;
     word-wrap: break-word;
     font-size: 1rem;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -509,6 +509,65 @@ body::after {
     padding: 20px;
     border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.analysis-text h1,
+.analysis-text h2,
+.analysis-text h3,
+.analysis-text h4 {
+    margin: 0.9rem 0 0.5rem;
+    line-height: 1.3;
+}
+
+.analysis-text p,
+.analysis-text ul,
+.analysis-text ol,
+.analysis-text table,
+.analysis-text blockquote {
+    margin: 0.7rem 0;
+}
+
+.analysis-text ul,
+.analysis-text ol {
+    padding-left: 1.35rem;
+}
+
+.analysis-text table {
+    width: 100%;
+    border-collapse: collapse;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.analysis-text th,
+.analysis-text td {
+    padding: 10px 12px;
+    text-align: left;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    vertical-align: top;
+}
+
+.analysis-text th {
+    background: rgba(102, 126, 234, 0.2);
+    font-weight: 700;
+}
+
+.analysis-text tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.analysis-text code {
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.35);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.analysis-text a {
+    color: #8bd7ff;
+    text-decoration: underline;
 }
 
 .nmap-output {
@@ -884,10 +943,10 @@ body::after {
 /* ====================== STREAMING CURSOR EFFECT ====================== */
 .analysis-text {
     position: relative;
-    white-space: pre-wrap;
+    white-space: normal;
     word-wrap: break-word;
     line-height: 1.6;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
     font-size: 0.95rem;
 }
 

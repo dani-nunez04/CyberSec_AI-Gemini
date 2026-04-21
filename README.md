@@ -1,10 +1,10 @@
 # CyberSec AI - Asistente Inteligente de Pentesting
 
-Un proyecto Python que utiliza **llama3.2:1b** (vía Ollama) para análisis inteligente de ciberseguridad.
+Un proyecto Python que utiliza **Gemini API** de Google para análisis inteligente de ciberseguridad.
 
 Integra:
 - **Nmap**: Escaneo de servicios y puertos
-- **Ollama + llama3.2:1b**: Análisis inteligente de vulnerabilidades
+- **Gemini 2.5**: Análisis inteligente de vulnerabilidades con IA avanzada
 - **ExploitDB**: Búsqueda de exploits usando FAISS y SentenceTransformers
 - **FastAPI**: API REST con interfaz web moderna
 - **Reportes**: Generación de reportes en TXT y PDF
@@ -17,7 +17,9 @@ Integra:
 - **Linux** (Ubuntu 20.04+) o WSL2
 - **Python 3.8+**
 - **Nmap** instalado
-- **Ollama** con modelo `llama3.2:1b`
+
+### Requisitos API
+- **Gemini API Key** (gratuito en [ai.google.dev](https://ai.google.dev))
 
 ### Instalación de dependencias del sistema
 ```bash
@@ -25,29 +27,34 @@ sudo apt update
 sudo apt install -y nmap
 ```
 
-### Instalación de Ollama
-1. Descarga desde [ollama.ai](https://ollama.ai)
-2. Ejecuta: `ollama pull llama3.2:1b`
-3. Verifica: `ollama list`
-
 ## 🚀 Inicio Rápido
 
-### 1. Instalar dependencias Python
+### 1. Obtener Gemini API Key
+1. Visita [ai.google.dev](https://ai.google.dev)
+2. Haz clic en "Get API Key"
+3. Copia tu API key
+
+### 2. Configurar variables de entorno
+```bash
+cp .env.example .env
+# Edita .env y añade:
+# GEMINI_API=tu_api_key_aqui
+```
+
+### 3. Instalar dependencias Python
 ```bash
 bash install_deps.sh
 ```
 
 O manualmente:
 ```bash
-pip install fastapi uvicorn faiss-cpu sentence-transformers fpdf pandas numpy -q
+pip install -r requirements.txt
 ```
 
-### 2. Iniciar la API
+### 4. Iniciar la API
 ```bash
 python app.py
 ```
-
-O usar el script (con verificación automática):
 ```bash
 bash run.sh
 ```
@@ -194,13 +201,16 @@ Verifica que:
 2. Puerto 8001 esté disponible: `lsof -i :8001`
 3. CORS esté habilitado (ya lo está en `app.py`)
 
-### "Ollama no responde"
+### "Gemini API Error"
 ```bash
-# Inicia Ollama si no está corriendo
-ollama serve
+# Verifica que GEMINI_API esté en .env
+grep GEMINI_API .env
 
-# En otra terminal
-ollama run llama3.2:1b
+# Verifica que sea una API key válida
+# Obtén una nueva en: https://ai.google.dev/
+
+# Prueba la conexión
+python test_gemini.py
 ```
 
 ### "Nmap no funciona"
@@ -221,9 +231,10 @@ python create_exploitdb_index.py
 
 ### "Job sigue en running después de mucho tiempo"
 1. Verifica el log del servidor: `ps aux | grep app.py`
-2. Checa si Nmap o Ollama están colgados
+2. Checa si Nmap está colgado
 3. Prueba con un escaneo básico en lugar de profundo
 4. Verifica recursos: `free -h` y `top`
+5. Verifica conexión a Gemini API: `python test_gemini.py`
 
 ## 📝 Comandos Útiles
 
@@ -277,7 +288,7 @@ watch -n 0.5 'curl -s http://localhost:8001/api/jobs/{job_id}/status | jq .'
 ## 📚 Tecnologías
 
 - **FastAPI**: Framework web moderno y rápido
-- **Ollama**: Motor de IA local
+- **Gemini 2.5**: API de IA avanzada (Google)
 - **FAISS**: Búsqueda vectorial eficiente (Meta)
 - **SentenceTransformers**: Embeddings de texto (Hugging Face)
 - **Nmap**: Escaneo de redes estándar

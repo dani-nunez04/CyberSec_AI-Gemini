@@ -10,6 +10,50 @@ const state = {
     investigationInterval: null
 };
 
+function getApiBaseUrl() {
+    const fromWindow = typeof window.CYBERSEC_API_BASE === 'string' ? window.CYBERSEC_API_BASE.trim() : '';
+    if (fromWindow) return fromWindow.replace(/\/$/, '');
+
+    const fromStorage = localStorage.getItem('CYBERSEC_API_BASE');
+    if (fromStorage && fromStorage.trim()) return fromStorage.trim().replace(/\/$/, '');
+
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return 'http://localhost:8001';
+    }
+
+    return window.location.origin;
+}
+
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderAnalysisMarkdown(markdownText) {
+    const analysisText = document.getElementById('analysisText');
+    if (!analysisText) return;
+
+    const text = markdownText || '';
+
+    if (window.marked && window.DOMPurify) {
+        marked.setOptions({
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false
+        });
+        const html = marked.parse(text);
+        analysisText.innerHTML = DOMPurify.sanitize(html);
+        return;
+    }
+
+    analysisText.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+}
+
 // Elementos del DOM
 let initialView, analysisView, searchInput, searchBtn, closeBtn, loadingIndicator, loadingText;
 let suggestions, tabBtns, scanRadios, downloadTxtBtn, downloadPdfBtn;
@@ -196,8 +240,8 @@ function fetchAnalysis(targetIp) {
     };
     
     const apiUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? `http://localhost:8001/api/analyze-stream`
-        : `${window.location.origin}/api/analyze-stream`;
+        ? `${getApiBaseUrl()}/api/analyze-stream`
+        : `${getApiBaseUrl()}/api/analyze-stream`;
     
     // Agregar logs iniciales
     addInvestigationLog(`<strong>Iniciando análisis de ${targetIp}</strong>`, 'searching');
@@ -329,12 +373,14 @@ function handleStreamEvent(data, analysisText) {
         case 'done':
             // Análisis de IA completado
             addInvestigationLog('✓ Análisis de IA completado', 'success');
+            renderAnalysisMarkdown(state.currentAnalysis.analysis);
             break;
             
         case 'complete':
             // Todo completado
             if (data.analysis) {
                 state.currentAnalysis.analysis = data.analysis;
+                renderAnalysisMarkdown(state.currentAnalysis.analysis);
             }
             break;
             
@@ -351,8 +397,8 @@ function pollJobLogs(jobId) {
     const maxPollAttempts = 3600; // 30 min * 60 * 2 (polling cada 500ms)
     
     const logsBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? `http://localhost:8001/api/jobs/${jobId}`
-        : `${window.location.origin}/api/jobs/${jobId}`;
+        ? `${getApiBaseUrl()}/api/jobs/${jobId}`
+        : `${getApiBaseUrl()}/api/jobs/${jobId}`;
     
     const logPoller = setInterval(() => {
         pollAttempts++;
@@ -410,7 +456,7 @@ function pollJobLogs(jobId) {
 
 function displayResults(data) {
     // Tab Análisis
-    document.getElementById('analysisText').textContent = data.analysis;
+    renderAnalysisMarkdown(data.analysis);
     
     // Tab Nmap
     document.getElementById('nmapOutput').textContent = data.nmap_output;
@@ -477,8 +523,8 @@ function downloadReport(format) {
     const exploitsJson = JSON.stringify(state.currentAnalysis.exploits);
     
     const apiUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? `http://localhost:8001/api/save-report`
-        : `${window.location.origin}/api/save-report`;
+        ? `${getApiBaseUrl()}/api/save-report`
+        : `${getApiBaseUrl()}/api/save-report`;
     
     fetch(apiUrl, {
         method: 'POST',
