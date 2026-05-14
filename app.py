@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import subprocess
 import json
 import os
+import secrets
 from fpdf import FPDF
 import asyncio
 import sys
@@ -21,6 +22,7 @@ import re
 import httpx
 import google.generativeai as genai
 from dotenv import load_dotenv
+from typing import Optional
 
 # Intentar importar exploitdb_search; si falla, se usará la versión simplificada
 try:
@@ -98,6 +100,39 @@ app.add_middleware(
 # Modelo Gemini a utilizar
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
+# Configuración de autenticación básica
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "abc123")
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "21600"))
+session_store = {}
+
+
+def create_session(username: str) -> str:
+    token = secrets.token_urlsafe(32)
+    session_store[token] = {
+        "user": username,
+        "created_at": time.time()
+    }
+    return token
+
+
+def is_session_valid(token: Optional[str]) -> bool:
+    if not token:
+        return False
+    session = session_store.get(token)
+    if not session:
+        return False
+    if time.time() - session["created_at"] > SESSION_TTL_SECONDS:
+        session_store.pop(token, None)
+        return False
+    return True
+
+
+def require_session(x_session_token: Optional[str] = Header(None)) -> str:
+    if not is_session_valid(x_session_token):
+        raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
+    return x_session_token
+
 @app.on_event("startup")
 async def warmup_gemini():
     def _warm():
@@ -121,6 +156,11 @@ class AnalysisResponse(BaseModel):
     analysis: str
     exploits: list
     services: list
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 def scan_target(ip: str, scan_type: str = "basic") -> str:
     """Ejecuta escaneo Nmap
@@ -510,8 +550,24 @@ def strip_ansi_sequences(text: str) -> str:
     return cleaned.strip()
 
 
+@app.post("/api/login")
+async def login(credentials: LoginRequest):
+    if credentials.username != ADMIN_USER or credentials.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Credenciales inválidas")
+
+    token = create_session(credentials.username)
+    return {"token": token, "user": credentials.username}
+
+
+@app.get("/api/session")
+async def session_status(x_session_token: Optional[str] = Header(None)):
+    if not is_session_valid(x_session_token):
+        return {"authenticated": False}
+    return {"authenticated": True, "user": session_store[x_session_token]["user"]}
+
+
 @app.get("/api/gemini/debug")
-async def gemini_debug():
+async def gemini_debug(_: str = Depends(require_session)):
     """Endpoint simple para diagnosticar Gemini API"""
     try:
         add_log("Verificando conexión con Gemini API...", "info")
@@ -614,7 +670,7 @@ def perform_analysis(job_id: str, request: PentestRequest):
         thread_local.current_job = None
 
 @app.post("/api/analyze", response_model=AnalysisResponse)
-async def analyze_target(request: PentestRequest):
+async def analyze_target(request: PentestRequest, _: str = Depends(require_session)):
     """Endpoint principal: encoloa el análisis y retorna el job_id"""
     
     try:
@@ -673,7 +729,7 @@ async def stream_gemini_analysis(prompt: str):
 
 
 @app.post("/api/analyze-stream")
-async def analyze_stream(request: StreamAnalysisRequest):
+async def analyze_stream(request: StreamAnalysisRequest, _: str = Depends(require_session)):
     """Endpoint de streaming: devuelve el análisis token por token usando SSE"""
     
     target_ip = request.target_ip
@@ -789,7 +845,7 @@ Sé técnico, específico y prioriza evidencia verificable."""
 
 
 @app.post("/api/save-report")
-async def save_report(request: Request):
+async def save_report(request: Request, _: str = Depends(require_session)):
     """Guarda el reporte en el formato especificado. Espera JSON body.
 
     JSON body keys: target_ip, nmap_output, analysis, exploits (list o string), format
@@ -894,7 +950,7 @@ def save_as_pdf(target_ip: str, nmap_output: str, analysis: str, exploits: list)
     return filename
 
 @app.get("/api/status")
-async def status():
+async def status(_: str = Depends(require_session)):
     """Verifica si la API está activa"""
     return {"status": "active", "message": "CyberSec AI API running"}
 
@@ -902,7 +958,7 @@ async def status():
 # Endpoints de Ollama eliminados - se usan ahora endpoints de Gemini
 
 @app.get("/api/jobs/{job_id}/status")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, _: str = Depends(require_session)):
     """Obtiene el estado de un job específico"""
     job = job_store.get(job_id)
     if not job:
@@ -919,7 +975,7 @@ async def get_job_status(job_id: str):
     }
 
 @app.get("/api/jobs/{job_id}/logs")
-async def get_job_logs(job_id: str):
+async def get_job_logs(job_id: str, _: str = Depends(require_session)):
     """Obtiene los logs de un job específico"""
     job = job_store.get(job_id)
     if not job:
@@ -928,7 +984,7 @@ async def get_job_logs(job_id: str):
     return {"logs": job["logs"]}
 
 @app.get("/api/jobs/{job_id}/result")
-async def get_job_result(job_id: str):
+async def get_job_result(job_id: str, _: str = Depends(require_session)):
     """Obtiene el resultado completo de un job (solo si está completed)"""
     job = job_store.get(job_id)
     if not job:
@@ -943,13 +999,13 @@ async def get_job_result(job_id: str):
     return job.get("result", {})
 
 @app.get("/api/logs")
-async def get_logs():
+async def get_logs(_: str = Depends(require_session)):
     """Obtiene los logs actuales de la investigación (global, para compatibilidad)"""
     return {"logs": list(analysis_logs)}
 
 
 @app.get("/api/reports/{filename}")
-async def download_report(filename: str):
+async def download_report(filename: str, _: str = Depends(require_session)):
     """Devuelve un archivo de reporte desde la carpeta `reports` (protegemos path traversal)."""
     # Prevent path traversal
     if ".." in filename or filename.startswith("/") or \

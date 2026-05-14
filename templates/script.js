@@ -10,11 +10,7 @@ const state = {
     investigationInterval: null
 };
 
-const LOGIN_CREDENTIALS = {
-    user: 'admin',
-    password: 'abc123'
-};
-const LOGIN_STORAGE_KEY = 'cybersec_logged_in';
+const AUTH_TOKEN_KEY = 'cybersec_auth_token';
 
 function getApiBaseUrl() {
     const fromWindow = typeof window.CYBERSEC_API_BASE === 'string' ? window.CYBERSEC_API_BASE.trim() : '';
@@ -61,7 +57,7 @@ function renderAnalysisMarkdown(markdownText) {
 }
 
 // Elementos del DOM
-let loginView, loginForm, loginUserInput, loginPasswordInput, loginError;
+let loginView, loginForm, loginUserInput, loginPasswordInput, loginBtn, loginError;
 let initialView, analysisView, searchInput, searchBtn, closeBtn, loadingIndicator, loadingText;
 let suggestions, tabBtns, scanRadios, downloadTxtBtn, downloadPdfBtn;
 let investigationPanel, investigationLogs, investigationTimer;
@@ -71,6 +67,7 @@ function initializeDOM() {
     loginForm = document.getElementById('loginForm');
     loginUserInput = document.getElementById('loginUser');
     loginPasswordInput = document.getElementById('loginPassword');
+    loginBtn = document.getElementById('loginBtn');
     loginError = document.getElementById('loginError');
     initialView = document.getElementById('initialView');
     analysisView = document.getElementById('analysisView');
@@ -235,8 +232,38 @@ function attachEventListeners() {
     console.log('✓ Event listeners inicializados correctamente');
 }
 
+function getAuthToken() {
+    return sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setAuthToken(token) {
+    if (token) {
+        sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+        sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+}
+
+function getAuthHeaders(baseHeaders = {}) {
+    const token = getAuthToken();
+    if (!token) return baseHeaders;
+    return {
+        ...baseHeaders,
+        'X-Session-Token': token
+    };
+}
+
 function isAuthenticated() {
-    return sessionStorage.getItem(LOGIN_STORAGE_KEY) === 'true';
+    return Boolean(getAuthToken());
+}
+
+function handleUnauthorized(response) {
+    if (response.status === 401) {
+        setAuthToken('');
+        showLoginView();
+        throw new Error('Sesión expirada');
+    }
+    return response;
 }
 
 function showLoginView() {
@@ -262,29 +289,71 @@ function showMainView() {
     setTimeout(() => searchInput?.focus(), 200);
 }
 
-function initializeLoginState() {
-    if (isAuthenticated()) {
-        showMainView();
-    } else {
+async function initializeLoginState() {
+    const token = getAuthToken();
+    if (!token) {
         showLoginView();
+        return;
     }
+
+    try {
+        const response = await fetch(`${getApiBaseUrl()}/api/session`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) {
+            throw new Error('Sesión inválida');
+        }
+
+        const data = await response.json();
+        if (data.authenticated) {
+            showMainView();
+            return;
+        }
+    } catch (error) {
+        console.warn('Session check failed:', error);
+    }
+
+    setAuthToken('');
+    showLoginView();
 }
 
-function handleLoginSubmit(event) {
+async function handleLoginSubmit(event) {
     event.preventDefault();
 
     const username = loginUserInput.value.trim();
     const password = loginPasswordInput.value;
 
-    if (username === LOGIN_CREDENTIALS.user && password === LOGIN_CREDENTIALS.password) {
-        sessionStorage.setItem(LOGIN_STORAGE_KEY, 'true');
-        loginForm.reset();
-        showMainView();
-        return;
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Validando...';
     }
 
-    loginError.textContent = 'Usuario o contraseña incorrectos.';
-    loginError.classList.add('show');
+    try {
+        const response = await fetch(`${getApiBaseUrl()}/api/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+            throw new Error('Usuario o contraseña incorrectos.');
+        }
+
+        const data = await response.json();
+        setAuthToken(data.token);
+        loginForm.reset();
+        showMainView();
+    } catch (error) {
+        loginError.textContent = error.message || 'Error al iniciar sesión.';
+        loginError.classList.add('show');
+    } finally {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Login';
+        }
+    }
 }
 
 // Funciones principales
@@ -347,12 +416,17 @@ function fetchAnalysis(targetIp) {
     // Usar fetch con streaming
     fetch(apiUrl, {
         method: 'POST',
-        headers: {
+        headers: getAuthHeaders({
             'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify(payload)
     })
     .then(response => {
+        if (response.status === 401) {
+            setAuthToken('');
+            showLoginView();
+            throw new Error('Sesión expirada. Inicia sesión nuevamente.');
+        }
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -484,6 +558,10 @@ function pollJobLogs(jobId) {
     
     const logPoller = setInterval(() => {
         pollAttempts++;
+        if (!isAuthenticated()) {
+            clearInterval(logPoller);
+            return;
+        }
         if (pollAttempts > maxPollAttempts) {
             clearInterval(logPoller);
             addInvestigationLog('Error: Timeout en el análisis (superó 30 minutos)', 'error');
@@ -491,7 +569,8 @@ function pollJobLogs(jobId) {
         }
         
         // Obtener logs
-        fetch(`${logsBaseUrl}/logs`)
+        fetch(`${logsBaseUrl}/logs`, { headers: getAuthHeaders() })
+            .then(handleUnauthorized)
             .then(r => r.json())
             .then(data => {
                 const logs = data.logs || [];
@@ -507,7 +586,8 @@ function pollJobLogs(jobId) {
             .catch(() => {}); // Ignorar errores de polling
         
         // Verificar estado del job
-        fetch(`${logsBaseUrl}/status`)
+        fetch(`${logsBaseUrl}/status`, { headers: getAuthHeaders() })
+            .then(handleUnauthorized)
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'completed') {
@@ -516,7 +596,8 @@ function pollJobLogs(jobId) {
                     addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
                     
                     // Obtener resultado completo
-                    fetch(`${logsBaseUrl}/result`)
+                    fetch(`${logsBaseUrl}/result`, { headers: getAuthHeaders() })
+                        .then(handleUnauthorized)
                         .then(r => r.json())
                         .then(result => {
                             state.currentAnalysis = result;
@@ -610,9 +691,9 @@ function downloadReport(format) {
     
     fetch(apiUrl, {
         method: 'POST',
-        headers: {
+        headers: getAuthHeaders({
             'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify({
             target_ip: state.targetIp,
             nmap_output: state.currentAnalysis.nmap_output,
@@ -621,13 +702,15 @@ function downloadReport(format) {
             format: format
         })
     })
+    .then(handleUnauthorized)
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             const filename = data.filename || '';
             const downloadUrl = data.download_url || `/api/reports/${filename}`;
             // Fetch the file and trigger a client-side download
-            fetch(downloadUrl)
+            fetch(downloadUrl, { headers: getAuthHeaders() })
+                .then(handleUnauthorized)
                 .then(resp => {
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     return resp.blob();
