@@ -68,10 +68,11 @@ http://localhost:8001
 
 ### Opción 1: Interfaz Web (Recomendada)
 1. Abre `http://localhost:8001` en tu navegador
-2. Ingresa una IP o dominio
-3. Elige tipo de escaneo (básico o profundo)
-4. Espera los resultados
-5. Descarga el reporte (TXT o PDF)
+2. Inicia sesión con las credenciales configuradas en `ADMIN_USER` y `ADMIN_PASSWORD`
+3. Ingresa una IP o dominio
+4. Elige tipo de escaneo (básico o profundo)
+5. Espera los resultados
+6. Descarga el reporte (TXT o PDF)
 
 ### Opción 2: CLI Interactivo
 ```bash
@@ -303,4 +304,3 @@ watch -n 0.5 'curl -s http://localhost:8001/api/jobs/{job_id}/status | jq .'
 - [ ] Autenticación y control de acceso
 - [ ] Caché de resultados de FAISS
 - [ ] Exportar reportes a HTML interactivo
-

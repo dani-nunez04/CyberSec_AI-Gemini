@@ -10,6 +10,8 @@ const state = {
     investigationInterval: null
 };
 
+const AUTH_TOKEN_KEY = 'cybersec_auth_token';
+
 function getApiBaseUrl() {
     const fromWindow = typeof window.CYBERSEC_API_BASE === 'string' ? window.CYBERSEC_API_BASE.trim() : '';
     if (fromWindow) return fromWindow.replace(/\/$/, '');
@@ -55,11 +57,18 @@ function renderAnalysisMarkdown(markdownText) {
 }
 
 // Elementos del DOM
+let loginView, loginForm, loginUserInput, loginPasswordInput, loginBtn, loginError;
 let initialView, analysisView, searchInput, searchBtn, closeBtn, loadingIndicator, loadingText;
 let suggestions, tabBtns, scanRadios, downloadTxtBtn, downloadPdfBtn;
 let investigationPanel, investigationLogs, investigationTimer;
 
 function initializeDOM() {
+    loginView = document.getElementById('loginView');
+    loginForm = document.getElementById('loginForm');
+    loginUserInput = document.getElementById('loginUser');
+    loginPasswordInput = document.getElementById('loginPassword');
+    loginBtn = document.getElementById('loginBtn');
+    loginError = document.getElementById('loginError');
     initialView = document.getElementById('initialView');
     analysisView = document.getElementById('analysisView');
     searchInput = document.getElementById('searchInput');
@@ -165,6 +174,19 @@ function addInvestigationLog(message, type = 'searching') {
 
 // Event Listeners para la vista inicial
 function attachEventListeners() {
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLoginSubmit);
+    }
+
+    if (loginUserInput && loginPasswordInput && loginError) {
+        [loginUserInput, loginPasswordInput].forEach(input => {
+            input.addEventListener('input', () => {
+                loginError.textContent = '';
+                loginError.classList.remove('show');
+            });
+        });
+    }
+
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && searchInput.value.trim()) {
             startAnalysis(searchInput.value.trim());
@@ -210,8 +232,137 @@ function attachEventListeners() {
     console.log('✓ Event listeners inicializados correctamente');
 }
 
+function getAuthToken() {
+    return sessionStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function setAuthToken(token) {
+    if (token) {
+        sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+    } else {
+        sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    }
+}
+
+function getAuthHeaders(baseHeaders = {}) {
+    const token = getAuthToken();
+    if (!token) return baseHeaders;
+    return {
+        ...baseHeaders,
+        'X-Session-Token': token
+    };
+}
+
+function isAuthenticated() {
+    return Boolean(getAuthToken());
+}
+
+function handleUnauthorized(response) {
+    if (response.status === 401) {
+        setAuthToken(null);
+        showLoginView();
+        throw new Error('Sesión expirada');
+    }
+    return response;
+}
+
+function showLoginView() {
+    if (!loginView) return;
+    loginView.classList.add('active');
+    loginView.setAttribute('aria-hidden', 'false');
+    initialView.classList.add('hidden');
+    analysisView.classList.remove('active');
+    if (loginUserInput) {
+        loginUserInput.focus();
+    }
+}
+
+function showMainView() {
+    if (!loginView) return;
+    loginView.classList.remove('active');
+    loginView.setAttribute('aria-hidden', 'true');
+    initialView.classList.remove('hidden');
+    if (loginError) {
+        loginError.textContent = '';
+        loginError.classList.remove('show');
+    }
+    setTimeout(() => searchInput?.focus(), 200);
+}
+
+async function initializeLoginState() {
+    const token = getAuthToken();
+    if (!token) {
+        showLoginView();
+        return;
+    }
+
+    try {
+        const response = await fetch(`${getApiBaseUrl()}/api/session`, {
+            headers: getAuthHeaders()
+        });
+        if (!response.ok) {
+            throw new Error('Sesión inválida');
+        }
+
+        const data = await response.json();
+        if (data.authenticated) {
+            showMainView();
+            return;
+        }
+    } catch (error) {
+        console.warn('Session check failed:', error);
+    }
+
+    setAuthToken(null);
+    showLoginView();
+}
+
+async function handleLoginSubmit(event) {
+    event.preventDefault();
+
+    const username = loginUserInput.value.trim();
+    const password = loginPasswordInput.value;
+
+    if (loginBtn) {
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Validando...';
+    }
+
+    try {
+        const response = await fetch(`${getApiBaseUrl()}/api/login`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+            throw new Error('Usuario o contraseña incorrectos.');
+        }
+
+        const data = await response.json();
+        setAuthToken(data.token);
+        loginForm.reset();
+        showMainView();
+    } catch (error) {
+        loginError.textContent = error.message || 'Error al iniciar sesión.';
+        loginError.classList.add('show');
+    } finally {
+        if (loginBtn) {
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Login';
+        }
+    }
+}
+
 // Funciones principales
 function startAnalysis(targetIp) {
+    if (!isAuthenticated()) {
+        showLoginView();
+        return;
+    }
+
     state.targetIp = targetIp;
     state.analysisActive = true;
     
@@ -265,12 +416,17 @@ function fetchAnalysis(targetIp) {
     // Usar fetch con streaming
     fetch(apiUrl, {
         method: 'POST',
-        headers: {
+        headers: getAuthHeaders({
             'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify(payload)
     })
     .then(response => {
+        if (response.status === 401) {
+            setAuthToken(null);
+            showLoginView();
+            throw new Error('Sesión expirada. Inicia sesión nuevamente.');
+        }
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -402,6 +558,10 @@ function pollJobLogs(jobId) {
     
     const logPoller = setInterval(() => {
         pollAttempts++;
+        if (!isAuthenticated()) {
+            clearInterval(logPoller);
+            return;
+        }
         if (pollAttempts > maxPollAttempts) {
             clearInterval(logPoller);
             addInvestigationLog('Error: Timeout en el análisis (superó 30 minutos)', 'error');
@@ -409,7 +569,8 @@ function pollJobLogs(jobId) {
         }
         
         // Obtener logs
-        fetch(`${logsBaseUrl}/logs`)
+        fetch(`${logsBaseUrl}/logs`, { headers: getAuthHeaders() })
+            .then(handleUnauthorized)
             .then(r => r.json())
             .then(data => {
                 const logs = data.logs || [];
@@ -425,7 +586,8 @@ function pollJobLogs(jobId) {
             .catch(() => {}); // Ignorar errores de polling
         
         // Verificar estado del job
-        fetch(`${logsBaseUrl}/status`)
+        fetch(`${logsBaseUrl}/status`, { headers: getAuthHeaders() })
+            .then(handleUnauthorized)
             .then(r => r.json())
             .then(data => {
                 if (data.status === 'completed') {
@@ -434,7 +596,8 @@ function pollJobLogs(jobId) {
                     addInvestigationLog(`✓ Análisis completado exitosamente`, 'success');
                     
                     // Obtener resultado completo
-                    fetch(`${logsBaseUrl}/result`)
+                    fetch(`${logsBaseUrl}/result`, { headers: getAuthHeaders() })
+                        .then(handleUnauthorized)
                         .then(r => r.json())
                         .then(result => {
                             state.currentAnalysis = result;
@@ -528,9 +691,9 @@ function downloadReport(format) {
     
     fetch(apiUrl, {
         method: 'POST',
-        headers: {
+        headers: getAuthHeaders({
             'Content-Type': 'application/json',
-        },
+        }),
         body: JSON.stringify({
             target_ip: state.targetIp,
             nmap_output: state.currentAnalysis.nmap_output,
@@ -539,13 +702,15 @@ function downloadReport(format) {
             format: format
         })
     })
+    .then(handleUnauthorized)
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             const filename = data.filename || '';
             const downloadUrl = data.download_url || `/api/reports/${filename}`;
             // Fetch the file and trigger a client-side download
-            fetch(downloadUrl)
+            fetch(downloadUrl, { headers: getAuthHeaders() })
+                .then(handleUnauthorized)
                 .then(resp => {
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     return resp.blob();
@@ -599,7 +764,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeDOM();
     wrapLogoLetters();
     attachEventListeners();
-    searchInput.focus();
+    initializeLoginState();
     console.log('✓ Aplicación lista');
 });
 
@@ -611,5 +776,5 @@ window.addEventListener('load', () => {
         wrapLogoLetters();
         attachEventListeners();
     }
-    searchInput.focus();
+    initializeLoginState();
 });
