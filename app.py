@@ -106,14 +106,28 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "abc123")
 SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "21600"))
 session_store = {}
 
+if ADMIN_USER == "admin" and ADMIN_PASSWORD == "abc123":
+    logger.warning("Usando credenciales por defecto. Configura ADMIN_USER y ADMIN_PASSWORD en producción.")
+
 
 def create_session(username: str) -> str:
+    purge_expired_sessions()
     token = secrets.token_urlsafe(32)
     session_store[token] = {
         "user": username,
         "created_at": time.time()
     }
     return token
+
+
+def purge_expired_sessions() -> None:
+    now = time.time()
+    expired_tokens = [
+        token for token, session in session_store.items()
+        if now - session["created_at"] > SESSION_TTL_SECONDS
+    ]
+    for token in expired_tokens:
+        session_store.pop(token, None)
 
 
 def is_session_valid(token: Optional[str]) -> bool:
@@ -129,6 +143,7 @@ def is_session_valid(token: Optional[str]) -> bool:
 
 
 def require_session(x_session_token: Optional[str] = Header(None)) -> str:
+    purge_expired_sessions()
     if not is_session_valid(x_session_token):
         raise HTTPException(status_code=401, detail="Sesión inválida o expirada")
     return x_session_token
@@ -561,6 +576,7 @@ async def login(credentials: LoginRequest):
 
 @app.get("/api/session")
 async def session_status(x_session_token: Optional[str] = Header(None)):
+    purge_expired_sessions()
     if not is_session_valid(x_session_token):
         return {"authenticated": False}
     return {"authenticated": True, "user": session_store[x_session_token]["user"]}

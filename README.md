@@ -68,7 +68,7 @@ http://localhost:8001
 
 ### Opción 1: Interfaz Web (Recomendada)
 1. Abre `http://localhost:8001` en tu navegador
-2. Inicia sesión con usuario **admin** y contraseña **abc123**
+2. Inicia sesión con las credenciales configuradas en `ADMIN_USER` y `ADMIN_PASSWORD`
 3. Ingresa una IP o dominio
 4. Elige tipo de escaneo (básico o profundo)
 5. Espera los resultados

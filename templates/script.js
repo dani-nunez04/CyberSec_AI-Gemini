@@ -259,7 +259,7 @@ function isAuthenticated() {
 
 function handleUnauthorized(response) {
     if (response.status === 401) {
-        setAuthToken('');
+        setAuthToken(null);
         showLoginView();
         throw new Error('Sesión expirada');
     }
@@ -313,7 +313,7 @@ async function initializeLoginState() {
         console.warn('Session check failed:', error);
     }
 
-    setAuthToken('');
+    setAuthToken(null);
     showLoginView();
 }
 
@@ -423,7 +423,7 @@ function fetchAnalysis(targetIp) {
     })
     .then(response => {
         if (response.status === 401) {
-            setAuthToken('');
+            setAuthToken(null);
             showLoginView();
             throw new Error('Sesión expirada. Inicia sesión nuevamente.');
         }
