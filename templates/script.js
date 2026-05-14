@@ -10,6 +10,12 @@ const state = {
     investigationInterval: null
 };
 
+const LOGIN_CREDENTIALS = {
+    user: 'admin',
+    password: 'abc123'
+};
+const LOGIN_STORAGE_KEY = 'cybersec_logged_in';
+
 function getApiBaseUrl() {
     const fromWindow = typeof window.CYBERSEC_API_BASE === 'string' ? window.CYBERSEC_API_BASE.trim() : '';
     if (fromWindow) return fromWindow.replace(/\/$/, '');
@@ -55,11 +61,17 @@ function renderAnalysisMarkdown(markdownText) {
 }
 
 // Elementos del DOM
+let loginView, loginForm, loginUserInput, loginPasswordInput, loginError;
 let initialView, analysisView, searchInput, searchBtn, closeBtn, loadingIndicator, loadingText;
 let suggestions, tabBtns, scanRadios, downloadTxtBtn, downloadPdfBtn;
 let investigationPanel, investigationLogs, investigationTimer;
 
 function initializeDOM() {
+    loginView = document.getElementById('loginView');
+    loginForm = document.getElementById('loginForm');
+    loginUserInput = document.getElementById('loginUser');
+    loginPasswordInput = document.getElementById('loginPassword');
+    loginError = document.getElementById('loginError');
     initialView = document.getElementById('initialView');
     analysisView = document.getElementById('analysisView');
     searchInput = document.getElementById('searchInput');
@@ -165,6 +177,19 @@ function addInvestigationLog(message, type = 'searching') {
 
 // Event Listeners para la vista inicial
 function attachEventListeners() {
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLoginSubmit);
+    }
+
+    if (loginUserInput && loginPasswordInput && loginError) {
+        [loginUserInput, loginPasswordInput].forEach(input => {
+            input.addEventListener('input', () => {
+                loginError.textContent = '';
+                loginError.classList.remove('show');
+            });
+        });
+    }
+
     searchInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter' && searchInput.value.trim()) {
             startAnalysis(searchInput.value.trim());
@@ -210,8 +235,65 @@ function attachEventListeners() {
     console.log('✓ Event listeners inicializados correctamente');
 }
 
+function isAuthenticated() {
+    return sessionStorage.getItem(LOGIN_STORAGE_KEY) === 'true';
+}
+
+function showLoginView() {
+    if (!loginView) return;
+    loginView.classList.add('active');
+    loginView.setAttribute('aria-hidden', 'false');
+    initialView.classList.add('hidden');
+    analysisView.classList.remove('active');
+    if (loginUserInput) {
+        loginUserInput.focus();
+    }
+}
+
+function showMainView() {
+    if (!loginView) return;
+    loginView.classList.remove('active');
+    loginView.setAttribute('aria-hidden', 'true');
+    initialView.classList.remove('hidden');
+    if (loginError) {
+        loginError.textContent = '';
+        loginError.classList.remove('show');
+    }
+    setTimeout(() => searchInput?.focus(), 200);
+}
+
+function initializeLoginState() {
+    if (isAuthenticated()) {
+        showMainView();
+    } else {
+        showLoginView();
+    }
+}
+
+function handleLoginSubmit(event) {
+    event.preventDefault();
+
+    const username = loginUserInput.value.trim();
+    const password = loginPasswordInput.value;
+
+    if (username === LOGIN_CREDENTIALS.user && password === LOGIN_CREDENTIALS.password) {
+        sessionStorage.setItem(LOGIN_STORAGE_KEY, 'true');
+        loginForm.reset();
+        showMainView();
+        return;
+    }
+
+    loginError.textContent = 'Usuario o contraseña incorrectos.';
+    loginError.classList.add('show');
+}
+
 // Funciones principales
 function startAnalysis(targetIp) {
+    if (!isAuthenticated()) {
+        showLoginView();
+        return;
+    }
+
     state.targetIp = targetIp;
     state.analysisActive = true;
     
@@ -599,7 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeDOM();
     wrapLogoLetters();
     attachEventListeners();
-    searchInput.focus();
+    initializeLoginState();
     console.log('✓ Aplicación lista');
 });
 
@@ -611,5 +693,5 @@ window.addEventListener('load', () => {
         wrapLogoLetters();
         attachEventListeners();
     }
-    searchInput.focus();
+    initializeLoginState();
 });

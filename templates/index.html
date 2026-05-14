@@ -25,12 +25,48 @@
     <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script src="script.js" defer></script>
 </head>
-<body>
-    <div class="app-container">
-        <!-- Vista inicial: Input de objetivo -->
-        <div class="initial-view" id="initialView">
-            <div class="search-container">
-                <div class="hero-halo"></div>
+    <body>
+        <div class="app-container">
+            <!-- Vista de Login -->
+            <div class="login-view" id="loginView" aria-hidden="true">
+                <div class="login-card">
+                    <div class="hero-halo login-halo"></div>
+                    <div class="logo-wrap" aria-label="CyberSec AI">
+                        <h1 class="logo">
+                            <span class="logo-word" data-text="CyberSec">CyberSec</span>
+                            <span class="logo-tagline">Acceso seguro al asistente</span>
+                            <span class="logo-word" data-text="AI">AI</span>
+                        </h1>
+                    </div>
+                    <form class="login-form" id="loginForm">
+                        <label class="login-label" for="loginUser">Usuario</label>
+                        <input
+                            type="text"
+                            id="loginUser"
+                            class="login-input"
+                            placeholder="admin"
+                            autocomplete="username"
+                            required
+                        >
+                        <label class="login-label" for="loginPassword">Contraseña</label>
+                        <input
+                            type="password"
+                            id="loginPassword"
+                            class="login-input"
+                            placeholder="••••••"
+                            autocomplete="current-password"
+                            required
+                        >
+                        <button type="submit" class="login-btn btn" id="loginBtn">Login</button>
+                        <p class="login-error" id="loginError" role="alert" aria-live="polite"></p>
+                        <p class="login-hint">Credenciales demo: <strong>admin</strong> / <strong>abc123</strong></p>
+                    </form>
+                </div>
+            </div>
+            <!-- Vista inicial: Input de objetivo -->
+            <div class="initial-view" id="initialView">
+                <div class="search-container">
+                    <div class="hero-halo"></div>
                 <div class="logo-wrap" aria-label="CyberSec AI">
                     <h1 class="logo">
                         <span class="logo-word" data-text="CyberSec">CyberSec</span>
