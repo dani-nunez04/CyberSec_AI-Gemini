@@ -10,7 +10,7 @@ echo ""
 
 # Verificar dependencias básicas
 echo "[*] Verificando dependencias..."
-python3 check_env.py || true
+python3 src/check_env.py || true
 
 echo ""
 echo "[*] Iniciando FastAPI en http://localhost:8001"
@@ -19,4 +19,4 @@ echo "[*] Presiona Ctrl+C para detener"
 echo ""
 
 # Ejecutar la API
-python3 app.py
+python3 src/app.py

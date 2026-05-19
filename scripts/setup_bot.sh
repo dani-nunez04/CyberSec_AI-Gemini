@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}") >/dev/null 2>&1 && pwd)"
 VENV_DIR="${SCRIPT_DIR}/venv"
 SERVICE_FILE="/etc/systemd/system/discord_cleaner.service"
 

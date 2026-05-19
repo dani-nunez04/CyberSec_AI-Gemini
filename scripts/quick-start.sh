@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Step 1: Check environment
 echo -e "${BLUE}[1/4]${NC} Verificando dependencias..."
-python check_env.py > /dev/null 2>&1
+python src/check_env.py > /dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓${NC} Todas las dependencias están instaladas"
 else
@@ -75,7 +75,7 @@ is_allowed_port() {
 # Cerrar procesos que escuchan en puertos no permitidos (con LIMITADO scope: sólo kill si pertenecen a usuario actual)
 ss -ltnp 2>/dev/null | tail -n +2 | while read -r line; do
   port=$(echo "$line" | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\1/')
-  user_part=$(echo "$line" | grep -o "users:(\"[^"]*\",pid=[0-9]+,fd=[0-9]+)" || true)
+  user_part=$(echo "$line" | grep -o "users:(\"[^\"]*\",pid=[0-9]+,fd=[0-9]+)" || true)
   pid=$(echo "$user_part" | sed -n 's/.*pid=\([0-9]\+\).*/\1/p')
   if [ -z "$port" ] || [ -z "$pid" ]; then
     continue
@@ -139,4 +139,4 @@ echo "  • CHANGES.md - Cambios realizados"
 echo ""
 
 # Ejecutar app
-python app.py
+python src/app.py

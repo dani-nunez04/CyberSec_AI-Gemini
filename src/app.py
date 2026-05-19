@@ -322,6 +322,7 @@ def extract_services(nmap_output: str) -> list:
                 services.append(" ".join(parts[2:]))
     return services
 
+
 def get_exploits(services: list) -> list:
     """Busca exploits para cada servicio usando FAISS si está disponible, sino usa versión simplificada"""
     all_exploits = []
@@ -355,6 +356,7 @@ def get_exploits(services: list) -> list:
         })
     
     return all_exploits
+
 
 def extract_json_from_text(text: str):
     """Attempt to extract and parse the first JSON object/array found in text."""
@@ -607,9 +609,6 @@ async def gemini_debug(_: str = Depends(require_session)):
         raise HTTPException(status_code=500, detail=f"Gemini error: {error_msg[:300]}")
 
 
-# Funciones auxiliares eliminadas - se usaban solo para Ollama
-# (parse_model_size, select_fallback_model, diagnose_ollama_error)
-
 def perform_analysis(job_id: str, request: PentestRequest):
     """Realiza el análisis completo (ejecutado en background por el executor)"""
     try:
@@ -685,6 +684,7 @@ def perform_analysis(job_id: str, request: PentestRequest):
         # Limpiar thread_local
         thread_local.current_job = None
 
+
 @app.post("/api/analyze", response_model=AnalysisResponse)
 async def analyze_target(request: PentestRequest, _: str = Depends(require_session)):
     """Endpoint principal: encoloa el análisis y retorna el job_id"""
@@ -720,8 +720,6 @@ async def analyze_target(request: PentestRequest, _: str = Depends(require_sessi
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creando job: {str(e)}")
 
-
-# ==================== ENDPOINT DE STREAMING ====================
 
 class StreamAnalysisRequest(BaseModel):
     target_ip: str
@@ -902,6 +900,7 @@ async def save_report(request: Request, _: str = Depends(require_session)):
         logger.exception("Save error")
         raise HTTPException(status_code=500, detail=f"Save error: {str(e)}")
 
+
 def save_as_txt(target_ip: str, nmap_output: str, analysis: str, exploits: list) -> str:
     """Guarda reporte en TXT"""
     safe_ip = sanitize_filename_component(target_ip)
@@ -921,6 +920,7 @@ def save_as_txt(target_ip: str, nmap_output: str, analysis: str, exploits: list)
                     f.write(f"  - {exploit}\n")
     
     return filename
+
 
 def save_as_pdf(target_ip: str, nmap_output: str, analysis: str, exploits: list) -> str:
     """Guarda reporte en PDF"""
@@ -965,6 +965,7 @@ def save_as_pdf(target_ip: str, nmap_output: str, analysis: str, exploits: list)
     pdf.output(filename)
     return filename
 
+
 @app.get("/api/status")
 async def status(_: str = Depends(require_session)):
     """Verifica si la API está activa"""
@@ -990,6 +991,7 @@ async def get_job_status(job_id: str, _: str = Depends(require_session)):
         "error": job["error"]
     }
 
+
 @app.get("/api/jobs/{job_id}/logs")
 async def get_job_logs(job_id: str, _: str = Depends(require_session)):
     """Obtiene los logs de un job específico"""
@@ -998,6 +1000,7 @@ async def get_job_logs(job_id: str, _: str = Depends(require_session)):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     
     return {"logs": job["logs"]}
+
 
 @app.get("/api/jobs/{job_id}/result")
 async def get_job_result(job_id: str, _: str = Depends(require_session)):
@@ -1013,6 +1016,7 @@ async def get_job_result(job_id: str, _: str = Depends(require_session)):
         raise HTTPException(status_code=500, detail=f"Job error: {job['error']}")
     
     return job.get("result", {})
+
 
 @app.get("/api/logs")
 async def get_logs(_: str = Depends(require_session)):
@@ -1042,3 +1046,6 @@ if os.path.exists("templates"):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
+
+
+

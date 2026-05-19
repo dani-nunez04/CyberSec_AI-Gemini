@@ -129,20 +129,6 @@ Ejecuta 5 tests de ejemplo:
 - ✅ Completación
 - ✅ Error handling
 
-### Si Quieres Personalizar
-
-El módulo `discord_webhook` está disponible para uso directo:
-
-```python
-from discord_webhook import discord_webhook
-
-# Enviar log personalizado
-discord_webhook.send_log("Mi mensaje personalizado", "info", job_id="mi-job")
-
-# O cualquiera de los métodos disponibles
-discord_webhook.send_job_start(job_id, target_ip, scan_type)
-```
-
 ## 📈 Estadísticas
 
 | Métrica | Valor |
@@ -162,7 +148,7 @@ python3 -c "
 from discord_webhook import discord_webhook
 from app import app
 print('✅ Discord Webhook integrado correctamente')
-print(f'Status: {\"ENABLED\" if discord_webhook.enabled else \"DISABLED\"}')
+print(f'Status: {"ENABLED" if discord_webhook.enabled else "DISABLED"}')
 "
 ```
 
